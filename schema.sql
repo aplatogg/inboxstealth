@@ -158,3 +158,25 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   window_start INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rate_window ON rate_limits(window_start);
+
+-- ---------- AccountMatrix (Multi-Account, Trial & Domain Vault) ----------
+CREATE TABLE IF NOT EXISTS matrix_accounts (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL,
+  service        TEXT NOT NULL,
+  tag            TEXT,
+  address        TEXT NOT NULL,
+  username       TEXT,
+  password       TEXT,
+  totp_secret    TEXT,
+  api_key        TEXT,
+  recovery_codes TEXT,
+  opsec_note     TEXT,
+  status         TEXT NOT NULL DEFAULT 'active',
+  expires_at     INTEGER,
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_matrix_user ON matrix_accounts(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_matrix_address ON matrix_accounts(address);
+

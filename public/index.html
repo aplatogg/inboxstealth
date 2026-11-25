@@ -337,6 +337,38 @@
   .aitem .meta .chip{justify-content:center;text-align:center;font-variant-numeric:tabular-nums;width:100%}
   .aitem .acts{display:flex;gap:6px;align-items:center;justify-content:flex-end;position:relative}
   .aitem .more-btn{min-width:32px;padding:0 10px;font-size:15px;font-weight:600;line-height:1}
+
+  /* AccountMatrix (#/matrix) */
+  .mx-list{display:flex;flex-direction:column;margin-top:12px;border:1px solid var(--border);border-radius:var(--radius-card);background:var(--surface);overflow:visible}
+  .mx-row{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(210px,1.5fr) 136px 175px auto;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--rule);position:relative}
+  .mx-row:first-child{border-top:0;border-radius:var(--radius-card) var(--radius-card) 0 0}
+  .mx-row:last-child{border-radius:0 0 var(--radius-card) var(--radius-card)}
+  .mx-row:only-child{border-radius:var(--radius-card)}
+  .mx-row:hover{background:var(--raised)}
+  .mx-svc{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .mx-svc-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .mx-svc-name{font-weight:600;font-size:13.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mx-opsec{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mx-id{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .mx-addr-line{display:flex;align-items:center;gap:6px;min-width:0}
+  .mx-copy-addr{border:0;background:none;padding:0;font-family:var(--mono);font-size:13px;font-weight:500;color:var(--text);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+  .mx-copy-addr:hover{color:var(--accent);text-decoration:underline}
+  .mx-cred-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+  .mx-mini-btn{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;border:1px solid var(--border);border-radius:4px;background:var(--raised);color:var(--text);font-size:11px;font-family:var(--mono);cursor:pointer;white-space:nowrap}
+  .mx-mini-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .mx-totp-cell,.mx-otp-cell{display:flex;align-items:center;gap:6px;justify-content:flex-start}
+  .mx-totp-pill{display:inline-flex;align-items:center;justify-content:space-between;gap:6px;height:28px;padding:0 9px;border:1px solid var(--border);border-radius:6px;background:var(--raised);color:var(--text);font-family:var(--mono);font-size:12.5px;font-weight:600;cursor:pointer;width:128px;font-variant-numeric:tabular-nums}
+  .mx-totp-pill:hover{border-color:var(--accent);color:var(--accent)}
+  .mx-totp-pill .rem{font-size:10.5px;font-weight:400;color:var(--muted)}
+  .mx-totp-pill.low .rem{color:var(--pill-negative-ink);font-weight:600}
+  .mx-otp-pill{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 9px;border:1px solid transparent;border-radius:6px;background:var(--pill-positive-bg);color:var(--pill-positive-ink);font-family:var(--mono);font-size:12.5px;font-weight:600;cursor:pointer;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mx-otp-pill:hover{filter:brightness(.96)}
+  .mx-link-pill{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 9px;border-radius:6px;background:var(--active);color:var(--accent);font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap}
+  .mx-link-pill:hover{text-decoration:underline}
+  .mx-pull-btn{height:28px;width:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--muted);cursor:pointer;flex:none}
+  .mx-pull-btn:hover{background:var(--raised);color:var(--text);border-color:var(--control)}
+  .mx-grid-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:10px}
+  .mx-grid-form input,.mx-grid-form select{height:36px;padding:0 10px;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-control);font-size:13px;min-width:0;width:100%}
   .setup{margin-top:var(--gap)}
   .setup-grid{display:grid;gap:var(--gap);grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}
   .panel{border:1px solid var(--border);border-radius:var(--radius-card);padding:18px 18px 20px;background:var(--surface)}
@@ -541,6 +573,12 @@
     .aitem .meta{display:flex;grid-column:2;grid-row:2;justify-content:flex-start;gap:6px}
     .aitem .meta .chip{width:auto}
     .aitem .acts{grid-column:3;grid-row:1 / span 2;align-self:center}
+    .mx-row{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;padding:12px 14px}
+    .mx-svc{grid-column:1;grid-row:1}
+    .mx-id{grid-column:1;grid-row:2}
+    .mx-totp-cell{grid-column:1;grid-row:3}
+    .mx-otp-cell{grid-column:1;grid-row:4}
+    .mx-row .acts{grid-column:2;grid-row:1 / span 4;align-self:start}
     .row-input input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),.row-input select{flex:1 1 100%;height:40px}
     .switch{flex:1 1 calc(50% - 6px);height:40px}
     .dlg{padding:18px 16px;width:min(460px,94vw);max-height:88dvh;overflow:auto}
@@ -829,6 +867,7 @@
     <nav aria-label="Navigasi utama">
       <a class="nav-item" href="#/inbox" data-nav="inbox">Inbox <span class="n" id="navCount">0</span></a>
       <a class="nav-item" href="#/addresses" data-nav="addresses">Alamat <span class="n" id="navAddr">0</span></a>
+      <a class="nav-item" href="#/matrix" data-nav="matrix">Matrix <span class="n" id="navMatrix">0</span></a>
       <a class="nav-item" href="#/domains" data-nav="domains">Domain <span class="n" id="navDomains">0</span></a>
       <a class="nav-item" href="#/dashboard" data-nav="dashboard" id="navDash" hidden>Ringkasan</a>
       
@@ -1070,6 +1109,49 @@
       </div>
       <div class="alist" id="addressRows"></div>
       <p class="note">Masa aktif mengikuti peran: member 7 hari; VIP dan admin bebas sampai 90 hari; owner sampai 365 hari. Semua isi alamat ikut terhapus saat kedaluwarsa.</p>
+    </section>
+
+    <section id="matrixView" hidden>
+      <div class="panel">
+        <h2 class="panel-title">1-Click Spawn Identity &amp; Account Vault</h2>
+        <p class="hint" style="margin:0 0 8px">Otomatis membuat inbox permanen di menyurat.me, meng-generate username &amp; password kuat, menjalankan live 2FA TOTP, serta menarik OTP email &amp; magic link secara langsung.</p>
+        <div class="mx-grid-form">
+          <input id="mxService" placeholder="Layanan (mis. Steam, GitHub, Cursor)" maxlength="60" autocomplete="off" aria-label="Layanan">
+          <input id="mxTag" placeholder="Tag (mis. #Alt-01, #Trial)" maxlength="40" autocomplete="off" aria-label="Tag">
+          <select id="mxDomain" aria-label="Domain email"></select>
+          <input id="mxLocal" placeholder="Nama email (kosong = acak)" maxlength="64" autocomplete="off" aria-label="Nama lokal email">
+          <select id="mxTrial" aria-label="Masa aktif / trial">
+            <option value="0">Permanen (Active)</option>
+            <option value="3">Trial 3 hari</option>
+            <option value="7">Trial 7 hari</option>
+            <option value="14">Trial 14 hari</option>
+            <option value="30">Trial 30 hari</option>
+            <option value="90">Trial 90 hari</option>
+          </select>
+        </div>
+        <div class="mx-grid-form">
+          <input id="mxUser" placeholder="Username (kosong = otomatis)" maxlength="80" autocomplete="off" aria-label="Username">
+          <input id="mxPass" placeholder="Password (kosong = auto 18-char kuat)" maxlength="200" autocomplete="off" aria-label="Password">
+          <input id="mxTotp" placeholder="2FA TOTP Secret / otpauth:// (opsional)" maxlength="200" autocomplete="off" aria-label="2FA TOTP Secret">
+          <input id="mxOpsec" placeholder="Catatan OPSEC (mis. Brave #3 · Proxy SG)" maxlength="300" autocomplete="off" aria-label="Catatan OPSEC">
+          <button class="btn btn-primary" id="mxSpawnBtn" type="button" style="height:36px">+ Spawn Akun</button>
+        </div>
+        <div class="auth-msg" id="mxSpawnMsg" hidden></div>
+      </div>
+
+      <div class="searchaddr" style="margin-top:16px">
+        <input id="mxSearch" type="search" placeholder="Cari layanan, tag, email, username, atau catatan OPSEC…" aria-label="Cari di Matrix">
+        <select id="mxStatusFilter" aria-label="Filter status" style="height:36px;padding:0 10px;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-control);font-size:13px">
+          <option value="all">Semua status</option>
+          <option value="active">Active</option>
+          <option value="trial">Trial</option>
+          <option value="cooldown">Cooldown</option>
+          <option value="burned">Burned / Suspended</option>
+        </select>
+        <button class="btn" id="mxRefreshAllBtn" type="button" style="height:36px">🔄 Refresh OTP</button>
+      </div>
+
+      <div class="mx-list" id="matrixRows"></div>
     </section>
 
     <section id="accountView" hidden>
@@ -1323,6 +1405,63 @@
   </div>
 </dialog>
 
+<dialog class="dlg" id="matrixEditDlg" style="width:min(540px,94vw)">
+  <h2 id="mxeTitle">Detail &amp; Vault Akun</h2>
+  <p class="sub mono" id="mxeAddr">—</p>
+  <div class="mx-grid-form" style="margin-top:8px">
+    <div class="field" style="margin:0">
+      <label for="mxeService">Layanan / Platform</label>
+      <input id="mxeService" maxlength="60" autocomplete="off">
+    </div>
+    <div class="field" style="margin:0">
+      <label for="mxeTag">Tag / Label</label>
+      <input id="mxeTag" placeholder="#Alt-01" maxlength="40" autocomplete="off">
+    </div>
+  </div>
+  <div class="mx-grid-form" style="margin-top:8px">
+    <div class="field" style="margin:0">
+      <label for="mxeUser">Username</label>
+      <input id="mxeUser" maxlength="80" autocomplete="off">
+    </div>
+    <div class="field" style="margin:0">
+      <label for="mxePass">Password</label>
+      <input id="mxePass" maxlength="200" autocomplete="off">
+    </div>
+  </div>
+  <div class="field" style="margin-top:10px">
+    <label for="mxeTotp">2FA TOTP Secret (Base32 atau URI otpauth://)</label>
+    <input id="mxeTotp" placeholder="JBSWY3DPEHPK3PXP" maxlength="200" autocomplete="off" class="mono">
+  </div>
+  <div class="field" style="margin-top:10px">
+    <label for="mxeApiKey">API Key / Token / License Key (Vault)</label>
+    <input id="mxeApiKey" placeholder="sk-... / token / license" maxlength="500" autocomplete="off" class="mono">
+  </div>
+  <div class="field" style="margin-top:10px">
+    <label for="mxeRecovery">2FA Recovery / Backup Codes</label>
+    <input id="mxeRecovery" placeholder="kode backup dipisah spasi/koma" maxlength="1000" autocomplete="off" class="mono">
+  </div>
+  <div class="mx-grid-form" style="margin-top:8px">
+    <div class="field" style="margin:0">
+      <label for="mxeOpsec">Catatan OPSEC (Browser Profile / Proxy)</label>
+      <input id="mxeOpsec" placeholder="Brave Profile #3 · Proxy SG" maxlength="300" autocomplete="off">
+    </div>
+    <div class="field" style="margin:0">
+      <label for="mxeStatus">Status Akun</label>
+      <select id="mxeStatus">
+        <option value="active">🟢 Active</option>
+        <option value="trial">🟡 Trial</option>
+        <option value="cooldown">🔵 Cooldown</option>
+        <option value="burned">🔴 Burned / Suspended</option>
+      </select>
+    </div>
+  </div>
+  <div class="auth-msg" id="mxeMsg" hidden></div>
+  <div class="row-actions" style="margin-top:14px">
+    <button type="button" class="btn" id="mxeCancel">Batal</button>
+    <button type="button" class="btn btn-primary" id="mxeSave">Simpan Perubahan</button>
+  </div>
+</dialog>
+
 <div class="navsheet" id="navSheet" data-open="false">
   <button class="close" id="navClose">Tutup</button>
   <div style="margin-top:16px" id="navSheetBody"></div>
@@ -1348,7 +1487,8 @@ const state = {
   me: null, domains: [], messages: [], selected: null,
   filter: "all", query: "", address: store.address, expires: store.expires, pinned: store.pinned,
   read: store.read, view: "inbox", pending: 0, userFilter: "all", users: [], resetRequests: [], lastReset: null, keys: [], audit: [], addressList: [], adminDomains: [], pendingTicket: null,
-  stats: null, announcements: [], addrQuery: "", sel: new Set()
+  stats: null, announcements: [], addrQuery: "", sel: new Set(),
+  matrixList: [], mxQuery: "", mxStatus: "all"
 };
 
 function api(path, opts){
@@ -1626,6 +1766,7 @@ async function enterApp(){
   if ($("navDash")) $("navDash").hidden = !isStaff();
   await loadDomains();
   loadAddresses();
+  loadMatrix();
   loadBanner();
   if (isStaff()) await loadUsers();
   route();
@@ -1727,6 +1868,11 @@ function renderDomainControls(){
     if (!picked && !locked && d.is_default) picked = d.domain;
   }
   sel.value = picked || state.domains[0].domain;
+  const mxSel = $("mxDomain");
+  if (mxSel) {
+    mxSel.innerHTML = sel.innerHTML;
+    mxSel.value = sel.value;
+  }
   $("navDomains").textContent = String(state.domains.length);
   if ($("premHint")) $("premHint").hidden = !(memberOnly && state.domains.some((d) => d.is_premium));
   if ($("previewAddr")) $("previewAddr").textContent = "nama@" + sel.value;
@@ -2503,6 +2649,7 @@ async function userAction(id, act){
 function renderTitle(){
   const v = state.view;
   if (v === "addresses"){ $("pageTitle").textContent = "Alamat"; $("pageSub").textContent = (state.addressList || []).length + " alamat aktif"; return; }
+  if (v === "matrix"){ $("pageTitle").textContent = "Account Matrix"; $("pageSub").textContent = (state.matrixList || []).length + " akun terdaftar · Identity, Live 2FA TOTP & Email OTP"; return; }
   if (v === "account"){ $("pageTitle").textContent = "Pengaturan akun"; $("pageSub").innerHTML = esc(state.me ? state.me.email : "") + ' ' + (state.me ? roleBadge(state.me.role) : ""); return; }
   if (v === "audit"){ $("pageTitle").textContent = "Log aktivitas"; $("pageSub").textContent = (state.audit || []).length + " kejadian terakhir"; return; }
   if (v === "dashboard"){ $("pageTitle").textContent = "Ringkasan"; $("pageSub").textContent = "Statistik 14 hari terakhir"; return; }
@@ -2573,6 +2720,7 @@ function tick(){
   if ($("ttlV")) $("ttlV").textContent = state.pinned ? "Permanen" : (left > 0
     ? new Date(state.expires).toLocaleTimeString("id-ID", {hour:"2-digit", minute:"2-digit"}) : "—");
   if ($("addrDomain") && state.address) $("addrDomain").textContent = state.address.split("@")[1] || "—";
+  if (state.view === "matrix") tickMatrixTotp();
 }
 
 let toastTimer = null;
@@ -2590,7 +2738,7 @@ function toast(msg, bad){
   toastTimer = setTimeout(() => { el.style.display = "none"; }, 3200);
 }
 
-const VIEWS = ["inbox", "addresses", "domains", "account", "users", "audit", "dashboard"];
+const VIEWS = ["inbox", "addresses", "matrix", "domains", "account", "users", "audit", "dashboard"];
 
 function route(){
   const h = location.hash.replace(/^#\/?/, "") || "inbox";
@@ -2599,6 +2747,7 @@ function route(){
 
   $("inboxView").hidden = state.view !== "inbox";
   $("addressesView").hidden = state.view !== "addresses";
+  if ($("matrixView")) $("matrixView").hidden = state.view !== "matrix";
   $("domainsView").hidden = state.view !== "domains";
   $("accountView").hidden = state.view !== "account";
   $("usersView").hidden = state.view !== "users";
@@ -2612,6 +2761,7 @@ function route(){
   if (ta) ta.hidden = state.view !== "inbox";
 
   if (state.view === "addresses") loadAddresses();
+  if (state.view === "matrix") loadMatrix();
   if (state.view === "domains") { loadDomains(); loadAdminDomains(); }
   if (state.view === "account") { loadKeys(); loadTOTP(); nsInit(); }
   if (state.view === "users") loadUsers();
@@ -2812,6 +2962,330 @@ function renderAddresses(){
         loadAddresses();
       } catch (e){ toast("Gagal: " + e.message, true); }
     }));
+}
+
+/* ---------- AccountMatrix (#/matrix) ---------- */
+const _MX_B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function mxB32Decode(str){
+  const clean = String(str || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = 0, val = 0;
+  const out = [];
+  for (const ch of clean) {
+    const idx = _MX_B32.indexOf(ch);
+    if (idx < 0) continue;
+    val = (val << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((val >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(out);
+}
+async function clientTotpAt(secretB32, atMs = Date.now()){
+  const bytes = mxB32Decode(secretB32);
+  if (!bytes.length) return null;
+  const counter = Math.floor(atMs / 1000 / 30);
+  const buf = new ArrayBuffer(8);
+  const view = new DataView(buf);
+  view.setUint32(0, Math.floor(counter / 0x100000000));
+  view.setUint32(4, counter % 0x100000000);
+  const key = await crypto.subtle.importKey("raw", bytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, buf));
+  const off = mac[mac.length - 1] & 0x0f;
+  const code = ((mac[off] & 0x7f) << 24) | ((mac[off + 1] & 0xff) << 16) | ((mac[off + 2] & 0xff) << 8) | (mac[off + 3] & 0xff);
+  return String(code % 1000000).padStart(6, "0");
+}
+async function tickMatrixTotp(){
+  const wrap = $("matrixRows");
+  if (!wrap) return;
+  const nowMs = Date.now();
+  const rem = 30 - (Math.floor(nowMs / 1000) % 30);
+  const pills = wrap.querySelectorAll("[data-mx-secret]");
+  for (const p of pills) {
+    const sec = p.dataset.mxSecret;
+    if (!sec) continue;
+    try {
+      const code = await clientTotpAt(sec, nowMs);
+      if (code) {
+        p.dataset.mxTotpCode = code;
+        const fmt = code.slice(0, 3) + " " + code.slice(3);
+        const cEl = p.querySelector(".code");
+        const rEl = p.querySelector(".rem");
+        if (cEl) cEl.textContent = fmt;
+        if (rEl) rEl.textContent = rem + "s";
+        p.classList.toggle("low", rem <= 6);
+      }
+    } catch {}
+  }
+}
+
+async function loadMatrix(){
+  try {
+    const j = await api("/api/matrix");
+    state.matrixList = j.accounts || [];
+  } catch {
+    state.matrixList = [];
+  }
+  if ($("navMatrix")) $("navMatrix").textContent = String(state.matrixList.length);
+  renderMatrix();
+  if (state.view === "matrix") renderTitle();
+}
+
+function mxStatusBadge(a){
+  const st = a.status || "active";
+  let remTxt = "";
+  if (a.expires_at) {
+    const left = a.expires_at - Date.now();
+    remTxt = left > 0 ? " · sisa " + fmtLeft(left) : " · expired";
+  }
+  if (st === "trial") return `<span class="chip wait">🟡 Trial${esc(remTxt)}</span>`;
+  if (st === "cooldown") return `<span class="chip">🔵 Cooldown${esc(remTxt)}</span>`;
+  if (st === "burned") return `<span class="chip no">🔴 Burned</span>`;
+  return `<span class="chip ok">🟢 Active${esc(remTxt)}</span>`;
+}
+
+function renderMatrix(){
+  const wrap = $("matrixRows");
+  if (!wrap) return;
+  const all = state.matrixList || [];
+  const q = (state.mxQuery || "").trim().toLowerCase();
+  const sf = state.mxStatus || "all";
+  const rows = all.filter((a) => {
+    if (sf !== "all" && a.status !== sf) return false;
+    if (!q) return true;
+    const hay = `${a.service || ""} ${a.tag || ""} ${a.address || ""} ${a.username || ""} ${a.opsec_note || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty-box" style="margin:12px">' +
+      (q || sf !== "all" ? "Tidak ada akun yang cocok dengan filter." : "Belum ada akun di Account Matrix. Klik + Spawn Akun di atas untuk membuat identitas baru.") +
+      "</div>";
+    return;
+  }
+  wrap.innerHTML = rows.map((a) => {
+    const totpFmt = a.totp_code ? (a.totp_code.slice(0, 3) + " " + a.totp_code.slice(3)) : "—";
+    const totpCell = a.totp_secret
+      ? `<button type="button" class="mx-totp-pill${(a.totp_rem && a.totp_rem <= 6) ? " low" : ""}" data-mx-secret="${escAttr(a.totp_secret)}" data-mx-totp-code="${escAttr(a.totp_code || "")}" title="Klik untuk menyalin kode 2FA TOTP">
+           <span class="code">${esc(totpFmt)}</span>
+           <span class="rem">${a.totp_rem || 30}s</span>
+         </button>`
+      : `<button type="button" class="mx-mini-btn" data-mx-edit="${escAttr(a.id)}" title="Tambah 2FA TOTP Secret">+ 2FA</button>`;
+
+    let otpCellHtml = "";
+    if (a.email_otp) {
+      otpCellHtml += `<button type="button" class="mx-otp-pill" data-mx-copy-val="${escAttr(a.email_otp)}" data-mx-copy-lbl="Kode OTP Email" title="Klik untuk salin OTP dari: ${escAttr(a.latest_subject || "")}">🔑 ${esc(a.email_otp)}</button>`;
+    }
+    if (a.magic_link) {
+      otpCellHtml += `<a class="mx-link-pill" href="${escAttr(a.magic_link)}" target="_blank" rel="noopener noreferrer" title="Buka link verifikasi dari email terbaru">🔗 Link</a>`;
+    }
+    if (!a.email_otp && !a.magic_link) {
+      otpCellHtml += `<span class="hint" style="font-size:11.5px">${a.message_count ? (a.message_count + " email") : "Belum ada OTP"}</span>`;
+    }
+    otpCellHtml += `<button type="button" class="mx-pull-btn" data-mx-pull="${escAttr(a.id)}" title="Tarik OTP &amp; cek email terbaru dari menyurat.me">🔄</button>`;
+
+    return `<div class="mx-row" data-mx-id="${escAttr(a.id)}">
+      <div class="mx-svc">
+        <div class="mx-svc-top">
+          <span class="mx-svc-name">${esc(a.service)}</span>
+          ${a.tag ? `<span class="chip note-chip">${esc(a.tag)}</span>` : ""}
+        </div>
+        <div>${mxStatusBadge(a)}</div>
+        ${a.opsec_note ? `<div class="mx-opsec" title="${escAttr(a.opsec_note)}">🛡 ${esc(a.opsec_note)}</div>` : ""}
+      </div>
+
+      <div class="mx-id">
+        <div class="mx-addr-line">
+          <button type="button" class="mx-copy-addr" data-mx-copy-val="${escAttr(a.address)}" data-mx-copy-lbl="Email" title="Klik untuk salin email">${esc(a.address)}</button>
+          <button type="button" class="mx-mini-btn" data-mx-open-inbox="${escAttr(a.address)}" title="Buka inbox email ini">↗ Inbox (${a.message_count || 0})</button>
+        </div>
+        <div class="mx-cred-line">
+          ${a.username ? `<button type="button" class="mx-mini-btn" data-mx-copy-val="${escAttr(a.username)}" data-mx-copy-lbl="Username" title="Klik untuk salin username">👤 ${esc(a.username)}</button>` : ""}
+          ${a.password ? `<button type="button" class="mx-mini-btn" data-mx-copy-val="${escAttr(a.password)}" data-mx-copy-lbl="Password" title="Klik untuk salin password">🔑 Sandi</button>` : ""}
+          ${a.api_key ? `<button type="button" class="mx-mini-btn" data-mx-copy-val="${escAttr(a.api_key)}" data-mx-copy-lbl="API Key" title="Klik untuk salin API Key / Token">⚡ API Key</button>` : ""}
+        </div>
+      </div>
+
+      <div class="mx-totp-cell">${totpCell}</div>
+      <div class="mx-otp-cell">${otpCellHtml}</div>
+
+      <div class="acts">
+        <details class="rowmenu">
+          <summary class="btn btn-sm more-btn" title="Menu Akun" aria-label="Menu Akun">⋯</summary>
+          <div class="menu-pop">
+            <button type="button" class="menu-item" data-mx-edit="${escAttr(a.id)}">Detail &amp; Vault (Edit)</button>
+            <button type="button" class="menu-item" data-mx-pull="${escAttr(a.id)}">Tarik OTP Email Terbaru</button>
+            <button type="button" class="menu-item" data-mx-open-inbox="${escAttr(a.address)}">Buka Inbox Email</button>
+            <button type="button" class="menu-item danger" data-mx-del="${escAttr(a.id)}" data-mx-addr="${escAttr(a.address)}">Hapus dari Matrix</button>
+          </div>
+        </details>
+      </div>
+    </div>`;
+  }).join("");
+
+  wrap.querySelectorAll("[data-mx-copy-val]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(b.dataset.mxCopyVal);
+        toast((b.dataset.mxCopyLbl || "Teks") + " disalin");
+      } catch { toast("Gagal menyalin", true); }
+    }));
+
+  wrap.querySelectorAll("[data-mx-secret]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const code = b.dataset.mxTotpCode || "";
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        toast("Kode 2FA TOTP disalin: " + code);
+      } catch { toast("Gagal menyalin", true); }
+    }));
+
+  wrap.querySelectorAll("[data-mx-open-inbox]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const addr = b.dataset.mxOpenInbox;
+      const item = (state.addressList || []).find((x) => x.address === addr) || {};
+      state.address = addr;
+      state.expires = item.expires_at || (Date.now() + 14 * 86400_000);
+      state.pinned  = item.pinned !== undefined ? !!item.pinned : true;
+      state.note    = item.note || null;
+      state.messages = []; state.selected = null; state.read = new Set(); state.seen = null; state.seenReady = false;
+      store.address = state.address; store.expires = state.expires; store.pinned = state.pinned;
+      location.hash = "#/inbox";
+      render(); loadInbox(); connectSSE();
+    }));
+
+  wrap.querySelectorAll("[data-mx-pull]").forEach((b) =>
+    b.addEventListener("click", () => pullMatrixOtp(b.dataset.mxPull)));
+
+  wrap.querySelectorAll("[data-mx-edit]").forEach((b) =>
+    b.addEventListener("click", () => openMatrixEditDlg(b.dataset.mxEdit)));
+
+  wrap.querySelectorAll("[data-mx-del]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      if (!confirm("Hapus akun " + b.dataset.mxAddr + " dari Account Matrix?")) return;
+      try {
+        await api("/api/matrix/" + encodeURIComponent(b.dataset.mxDel), { method: "DELETE" });
+        toast("Akun dihapus dari Matrix");
+        loadMatrix();
+      } catch (e) { toast("Gagal: " + e.message, true); }
+    }));
+
+  tickMatrixTotp();
+}
+
+async function spawnMatrixAccount(){
+  const msg = $("mxSpawnMsg");
+  if (msg) msg.hidden = true;
+  const service = ($("mxService") && $("mxService").value || "").trim();
+  if (!service) {
+    if (msg) showMsg(msg, "Nama layanan/platform wajib diisi (mis. Steam, GitHub, Cursor).", "err");
+    if ($("mxService")) $("mxService").focus();
+    return;
+  }
+  const btn = $("mxSpawnBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const trialDays = Number($("mxTrial") ? $("mxTrial").value : 0);
+    const j = await api("/api/matrix", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        service,
+        tag: ($("mxTag") && $("mxTag").value || "").trim(),
+        domain: $("mxDomain") ? $("mxDomain").value : "",
+        local: ($("mxLocal") && $("mxLocal").value || "").trim(),
+        trial_days: trialDays > 0 ? trialDays : null,
+        status: trialDays > 0 ? "trial" : "active",
+        username: ($("mxUser") && $("mxUser").value || "").trim(),
+        password: ($("mxPass") && $("mxPass").value || "").trim(),
+        totp_secret: ($("mxTotp") && $("mxTotp").value || "").trim(),
+        opsec_note: ($("mxOpsec") && $("mxOpsec").value || "").trim(),
+        auto_pin: true
+      })
+    });
+    const acc = j.account;
+    for (const id of ["mxService", "mxTag", "mxLocal", "mxUser", "mxPass", "mxTotp", "mxOpsec"]) {
+      if ($(id)) $(id).value = "";
+    }
+    try { await navigator.clipboard.writeText(acc.address); } catch {}
+    toast("Spawn sukses! Email disalin: " + acc.address);
+    await loadMatrix();
+    loadAddresses();
+  } catch (e) {
+    if (msg) showMsg(msg, "Gagal spawn akun: " + (e.message || "error"), "err");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function pullMatrixOtp(id){
+  try {
+    const j = await api("/api/matrix/" + encodeURIComponent(id) + "/otp");
+    const idx = (state.matrixList || []).findIndex((x) => x.id === id);
+    if (idx >= 0) {
+      Object.assign(state.matrixList[idx], j);
+      renderMatrix();
+    }
+    if (j.email_otp) {
+      try { await navigator.clipboard.writeText(j.email_otp); } catch {}
+      toast("🔑 OTP ditemukan & disalin: " + j.email_otp);
+    } else if (j.magic_link) {
+      toast("🔗 Link verifikasi ditemukan! Klik tombol Link di baris akun.");
+    } else {
+      toast("Belum ada kode OTP baru di inbox " + j.address);
+    }
+  } catch (e) {
+    toast("Gagal menarik OTP: " + e.message, true);
+  }
+}
+
+function openMatrixEditDlg(id){
+  const a = (state.matrixList || []).find((x) => x.id === id);
+  const dlg = $("matrixEditDlg");
+  if (!a || !dlg) return;
+  dlg.dataset.mxId = a.id;
+  $("mxeAddr").textContent = a.address;
+  $("mxeService").value = a.service || "";
+  $("mxeTag").value = a.tag || "";
+  $("mxeUser").value = a.username || "";
+  $("mxePass").value = a.password || "";
+  $("mxeTotp").value = a.totp_secret || "";
+  $("mxeApiKey").value = a.api_key || "";
+  $("mxeRecovery").value = a.recovery_codes || "";
+  $("mxeOpsec").value = a.opsec_note || "";
+  $("mxeStatus").value = a.status || "active";
+  if ($("mxeMsg")) $("mxeMsg").hidden = true;
+  dlg.showModal();
+}
+
+async function saveMatrixEdit(){
+  const dlg = $("matrixEditDlg");
+  if (!dlg || !dlg.dataset.mxId) return;
+  const msg = $("mxeMsg");
+  if (msg) msg.hidden = true;
+  try {
+    await api("/api/matrix/" + encodeURIComponent(dlg.dataset.mxId), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        service: $("mxeService").value,
+        tag: $("mxeTag").value,
+        username: $("mxeUser").value,
+        password: $("mxePass").value,
+        totp_secret: $("mxeTotp").value,
+        api_key: $("mxeApiKey").value,
+        recovery_codes: $("mxeRecovery").value,
+        opsec_note: $("mxeOpsec").value,
+        status: $("mxeStatus").value
+      })
+    });
+    dlg.close();
+    toast("Vault akun diperbarui");
+    loadMatrix();
+  } catch (e) {
+    if (msg) showMsg(msg, "Gagal menyimpan: " + e.message, "err");
+  }
 }
 
 function openTtlDialog(address){
@@ -3700,6 +4174,12 @@ on("whClose", "click", () => { const d = $("whDlg"); if (d) d.close(); });
 on("whAdd", "click", addWebhook);
 on("annBtn", "click", createAnnouncement);
 on("addrSearch", "input", (e) => { state.addrQuery = e.target.value; renderAddresses(); });
+on("mxSpawnBtn", "click", spawnMatrixAccount);
+on("mxSearch", "input", (e) => { state.mxQuery = e.target.value; renderMatrix(); });
+on("mxStatusFilter", "change", (e) => { state.mxStatus = e.target.value; renderMatrix(); });
+on("mxRefreshAllBtn", "click", () => { loadMatrix(); toast("Memperbarui semua OTP Matrix…"); });
+on("mxeCancel", "click", () => { const d = $("matrixEditDlg"); if (d) d.close(); });
+on("mxeSave", "click", saveMatrixEdit);
 on("bulkExtend", "click", () => {
   const role = state.me ? state.me.role : "member";
   bulkPatch(role === "member" ? { days: 0 } : { ttl: 1209600 });
@@ -3712,7 +4192,12 @@ $("createBtn").addEventListener("click", () => createInbox($("localInput").value
 $("localInput").addEventListener("keydown", (e) => { if (e.key === "Enter") createInbox($("localInput").value, null, ($("setupTtlWrap") && !$("setupTtlWrap").hidden) ? $("setupTtl").value : null); });
 $("copyBtn").addEventListener("click", copyAddress);
 $("copyTop").addEventListener("click", copyAddress);
-$("refreshBtn").addEventListener("click", () => { loadInbox(); if (isStaff()) loadUsers(); });
+$("refreshBtn").addEventListener("click", () => {
+  if (state.view === "matrix") { loadMatrix(); return; }
+  if (state.view === "addresses") { loadAddresses(); return; }
+  loadInbox();
+  if (isStaff()) loadUsers();
+});
 $("menuBtn").addEventListener("click", openNav);
 $("navClose").addEventListener("click", closeNav);
 $("searchInput").addEventListener("input", (e) => {
