@@ -1,0 +1,51 @@
+# InboxStealth — Multi-Domain Disposable Email Platform
+# Cloudflare Workers + D1 + KV / R2 + Email Routing + Turnstile
+#
+# Copy or edit this file with your own Cloudflare Account ID, D1 database_id,
+# KV namespace id, and custom domain routes before running `npx wrangler deploy`.
+
+name = "tempmail"
+main = "src/index.js"
+# account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+compatibility_date = "2024-11-06"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tempmail_db"
+# Fill after `npx wrangler d1 create tempmail_db`:
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# Default domain fallback when creating random inboxes:
+DEFAULT_DOMAIN = "mail.example.com"
+# Default inbox TTL in seconds (14 days):
+INBOX_TTL_SECONDS = "1209600"
+# Maximum incoming raw email size in bytes (15 MB):
+MAX_MESSAGE_BYTES = "15728640"
+# Maximum raw .eml archive size in bytes (6 MB):
+RAW_KEEP_BYTES = "6291456"
+# Bootstrap Owner email (auto-approved with `owner` role upon registration):
+OWNER_EMAIL = "owner@example.com"
+# Member quota limits:
+MAX_ACTIVE_INBOX = "10"
+MAX_CREATE_PER_HOUR = "30"
+# Optional Cloudflare Turnstile Site Key (set TURNSTILE_SECRET via `wrangler secret put TURNSTILE_SECRET`):
+TURNSTILE_SITE_KEY = ""
+
+# Storage for raw .eml archives and attachments (KV or R2 BUCKET):
+[[kv_namespaces]]
+binding = "FILE_KV"
+id = "00000000000000000000000000000000"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Optional custom domain routes:
+# [[routes]]
+# pattern = "mail.example.com"
+# custom_domain = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true

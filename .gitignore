@@ -1,0 +1,16 @@
+node_modules/
+.wrangler/
+.dryrun/
+.taste-skill/
+.dev.vars
+*.log
+.DS_Store
+OWNER-PASSWORD.txt
+DEPLOY-INFO.txt
+ADMINS.txt
+wrangler.local.toml
+backup-*.sql
+*.dump.sql
+*.bundle
+*.zip
+.clip.*

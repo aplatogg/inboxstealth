@@ -1,0 +1,17 @@
+{
+  "name": "inboxstealth",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create tempmail_db",
+    "db:init": "wrangler d1 execute tempmail_db --file=./schema.sql --remote",
+    "db:init:local": "wrangler d1 execute tempmail_db --file=./schema.sql --local",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.166.0"
+  }
+}
