@@ -673,6 +673,19 @@ for (const a of parsed.attachments) {
     received_at: t,
     attachments: parsed.attachments.length,
   });
+  if (box.user_id) {
+    try {
+      await autoRegisterMatrixFromEmail(
+        env,
+        box.user_id,
+        to,
+        parsed.from?.address || null,
+        parsed.from?.name || null,
+        parsed.subject || null,
+        t
+      );
+    } catch {}
+  }
   return msgId;
 }
 
@@ -1932,6 +1945,200 @@ function extractMagicLinkServer(textBody, htmlBody) {
   return null;
 }
 
+const MATRIX_SERVICE_RULES = [
+  { re: /anthropic\.com|claude\.com|claude\.ai/i, name: "Claude (Anthropic)" },
+  { re: /openai\.com|chatgpt\.com/i, name: "OpenAI" },
+  { re: /mistral\.ai/i, name: "Mistral AI" },
+  { re: /qwenlm\.ai|qwen\.ai|\bqwen\b/i, name: "Qwen AI" },
+  { re: /orcarouter\.ai/i, name: "OrcaRouter" },
+  { re: /zenmux\.ai/i, name: "ZenMux" },
+  { re: /langdock\.com/i, name: "Langdock" },
+  { re: /opper\.ai/i, name: "Opper" },
+  { re: /experientiallabs\.ai/i, name: "Experiential Labs" },
+  { re: /mlaiworld\.com|withmlai\.com|@ml\.ai\b|ml\s*ai\s*code/i, name: "ML AI Code" },
+  { re: /awsapps\.com|signin\.aws|quick\.aws\.com|amazonaws\.com|amazon\.com|\baws\b/i, name: "AWS" },
+  { re: /supabase\.(io|com)/i, name: "Supabase" },
+  { re: /oxylabs\.(io|us)/i, name: "Oxylabs" },
+  { re: /ionos\.com|\bionos\b/i, name: "IONOS" },
+  { re: /bluehost\.com/i, name: "Bluehost" },
+  { re: /namecheap\.com/i, name: "Namecheap" },
+  { re: /godaddy\.com/i, name: "GoDaddy" },
+  { re: /share-dns\.net|\bgname\b/i, name: "GNAME" },
+  { re: /playstation\.com|account\.sony\.com|\bplaystation\b|\bsony\b/i, name: "Sony PlayStation" },
+  { re: /viktor\.com/i, name: "Viktor" },
+  { re: /capskip\.com/i, name: "CapSkip" },
+  { re: /starz\.com/i, name: "STARZ" },
+  { re: /umich\.edu/i, name: "UMICH EDU" },
+  { re: /cursor\.(sh|com)/i, name: "Cursor" },
+  { re: /github\.com/i, name: "GitHub" },
+  { re: /steampowered\.com|valvesoftware\.com|\bsteam\b/i, name: "Steam" },
+  { re: /vercel\.com/i, name: "Vercel" },
+  { re: /cloudflare\.com/i, name: "Cloudflare" },
+  { re: /discord\.com/i, name: "Discord" },
+  { re: /digitalocean\.com/i, name: "DigitalOcean" },
+  { re: /railway\.app/i, name: "Railway" },
+  { re: /huggingface\.co/i, name: "Hugging Face" },
+  { re: /replicate\.com/i, name: "Replicate" },
+  { re: /google\.com/i, name: "Google" },
+  { re: /microsoft\.com/i, name: "Microsoft" },
+  { re: /netflix\.com/i, name: "Netflix" },
+  { re: /spotify\.com/i, name: "Spotify" },
+];
+
+function detectServiceFromEmail(fromAddr, fromName, subject) {
+  const addr = String(fromAddr || "").trim().toLowerCase();
+  const name = String(fromName || "").trim();
+  const subj = String(subject || "").trim();
+  const combined = `${addr} | ${name} | ${subj}`;
+  for (const r of MATRIX_SERVICE_RULES) {
+    if (r.re.test(combined)) return r.name;
+  }
+  if (name) {
+    const fromMatch = name.match(/\bfrom\s+([A-Za-z0-9 ._-]{2,36})$/i);
+    if (fromMatch) return fromMatch[1].trim();
+    const cleaned = name
+      .replace(/\b(customer\s+service|support|team|auth|notifications?|no-?reply|security|account|verify|mail)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cleaned.length >= 2 && cleaned.length <= 32 && !/^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(cleaned)) {
+      return cleaned;
+    }
+  }
+  if (addr.includes("@")) {
+    const host = addr.split("@")[1]
+      .replace(/^(mail|email|emails|notifications?|updates?|tm|auth|account|service|login|signin|app|txn-email|email\d+)\./gi, "")
+      .replace(/^(mail|app|account)\./gi, "");
+    const base = host.split(".")[0] || "";
+    if (base.length >= 2) {
+      return base.charAt(0).toUpperCase() + base.slice(1);
+    }
+  }
+  return null;
+}
+
+function detectStatusFromSubjects(subjects) {
+  const joined = (subjects || []).join(" \n ");
+  if (/\b(deactivated|suspended|terminated|banned|disabled|blocked|account\s+closed)\b/i.test(joined)) {
+    return "burned";
+  }
+  if (/\b(action\s+needed|response\s+required|unable\s+to\s+process|did\s+not\s+go\s+through|payment\s+failed)\b/i.test(joined)) {
+    return "cooldown";
+  }
+  if (/\b(trial|still\s+meaning\s+to\s+try|bonus\s+credits|free\s+credits?)\b/i.test(joined)) {
+    return "trial";
+  }
+  return "active";
+}
+
+async function autoRegisterMatrixFromEmail(env, userId, inboxAddr, fromAddr, fromName, subject, receivedAt = now()) {
+  if (!userId || !inboxAddr) return;
+  const service = detectServiceFromEmail(fromAddr, fromName, subject);
+  if (!service) return;
+  const existing = await env.DB.prepare(
+    `SELECT id, status FROM matrix_accounts WHERE user_id = ?1 AND address = ?2 AND LOWER(service) = LOWER(?3) LIMIT 1`
+  ).bind(userId, inboxAddr, service).first();
+
+  const detStatus = detectStatusFromSubjects([subject || ""]);
+  if (existing) {
+    const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && existing.status === "active" ? "cooldown" : existing.status);
+    await env.DB.prepare(
+      `UPDATE matrix_accounts SET status = ?2, updated_at = ?3 WHERE id = ?1`
+    ).bind(existing.id, nextStatus, receivedAt).run();
+    return;
+  }
+
+  const localPart = inboxAddr.split("@")[0] || "user";
+  const username = localPart.replace(/[._-]/g, "");
+  await env.DB.prepare(
+    `INSERT INTO matrix_accounts
+       (id, user_id, service, tag, address, username, password, totp_secret,
+        api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
+     VALUES (?1,?2,?3,'#Auto',?4,?5,NULL,NULL,NULL,NULL,'Auto-detected dari email masuk',?6,NULL,?7,?7)`
+  ).bind(crypto.randomUUID(), userId, service, inboxAddr, username, detStatus, receivedAt).run();
+}
+
+async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
+  const { results: msgs } = await env.DB.prepare(
+    `SELECT m.inbox, m.from_addr, m.from_name, m.subject, m.received_at, i.note
+       FROM messages m
+       JOIN inboxes i ON i.address = m.inbox
+      WHERE i.user_id = ?1
+      ORDER BY m.received_at ASC`
+  ).bind(userId).all();
+
+  const { results: existingRows } = await env.DB.prepare(
+    `SELECT id, service, address, status FROM matrix_accounts WHERE user_id = ?1`
+  ).bind(userId).all();
+
+  const existingSet = new Set((existingRows || []).map((r) => `${r.address.toLowerCase()}||${(r.service || "").toLowerCase()}`));
+  const groups = new Map();
+
+  for (const m of msgs || []) {
+    const svc = detectServiceFromEmail(m.from_addr, m.from_name, m.subject);
+    if (!svc) continue;
+    const key = `${m.inbox.toLowerCase()}||${svc.toLowerCase()}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        address: m.inbox.toLowerCase(),
+        service: svc,
+        first_at: m.received_at || nowMs,
+        last_at: m.received_at || nowMs,
+        subjects: [],
+        note: m.note || null,
+      });
+    }
+    const g = groups.get(key);
+    if (m.received_at && m.received_at > g.last_at) g.last_at = m.received_at;
+    if (m.subject) g.subjects.push(m.subject);
+  }
+
+  // Count how many accounts exist per service to auto-tag #Alt-1, #Alt-2 when multiple accounts share the same service
+  const svcCounts = new Map();
+  for (const r of existingRows || []) {
+    const k = (r.service || "").toLowerCase();
+    svcCounts.set(k, (svcCounts.get(k) || 0) + 1);
+  }
+  const svcTotals = new Map();
+  for (const g of groups.values()) {
+    const k = g.service.toLowerCase();
+    svcTotals.set(k, (svcTotals.get(k) || 0) + 1);
+  }
+
+  let added = 0;
+  for (const [key, g] of groups.entries()) {
+    if (existingSet.has(key)) continue;
+    existingSet.add(key);
+    const svcKey = g.service.toLowerCase();
+    const nextIdx = (svcCounts.get(svcKey) || 0) + 1;
+    svcCounts.set(svcKey, nextIdx);
+    const totalForSvc = svcTotals.get(svcKey) || 1;
+    const tag = totalForSvc > 1 ? `#Alt-${String(nextIdx).padStart(2, "0")}` : "#Auto";
+    const status = detectStatusFromSubjects(g.subjects);
+    const localPart = g.address.split("@")[0] || "user";
+    const username = localPart.replace(/[._-]/g, "");
+
+    await env.DB.prepare(
+      `INSERT INTO matrix_accounts
+         (id, user_id, service, tag, address, username, password, totp_secret,
+          api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
+       VALUES (?1,?2,?3,?4,?5,?6,NULL,NULL,NULL,NULL,?7,?8,NULL,?9,?10)`
+    ).bind(
+      crypto.randomUUID(),
+      userId,
+      g.service,
+      tag,
+      g.address,
+      username,
+      g.note || "Auto-synced dari inbox menyurat.me",
+      status,
+      g.first_at,
+      g.last_at
+    ).run();
+    added++;
+  }
+  return added;
+}
+
 async function enrichMatrixAccount(env, row, nowMs = now()) {
   let totpCode = null;
   let totpRem  = null;
@@ -1941,20 +2148,34 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
       totpRem  = 30 - (Math.floor(nowMs / 1000) % 30);
     } catch {}
   }
-  const latest = await env.DB.prepare(
+  const { results: recentMsgs } = await env.DB.prepare(
     `SELECT id, from_addr, from_name, subject, received_at,
             SUBSTR(COALESCE(text_body, ''), 1, 8000) AS text_body,
             SUBSTR(COALESCE(html_body, ''), 1, 16000) AS html_body
        FROM messages
       WHERE inbox = ?1
-      ORDER BY received_at DESC LIMIT 1`
-  ).bind(row.address).first();
-  const cntRow = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM messages WHERE inbox = ?1`
-  ).bind(row.address).first();
+      ORDER BY received_at DESC LIMIT 25`
+  ).bind(row.address).all();
 
-  const emailOtp  = latest ? extractOtpServer(latest.subject, latest.text_body, latest.html_body) : null;
-  const magicLink = latest ? extractMagicLinkServer(latest.text_body, latest.html_body) : null;
+  const allMsgs = recentMsgs || [];
+  const targetSvc = String(row.service || "").trim().toLowerCase();
+  const svcMsgs = allMsgs.filter((m) => {
+    const det = detectServiceFromEmail(m.from_addr, m.from_name, m.subject);
+    if (det && det.toLowerCase() === targetSvc) return true;
+    const hay = `${m.from_addr || ""} ${m.from_name || ""} ${m.subject || ""}`.toLowerCase();
+    return targetSvc.length >= 3 && hay.includes(targetSvc);
+  });
+
+  const pool = svcMsgs.length ? svcMsgs : allMsgs;
+  const latest = pool[0] || null;
+
+  let emailOtp  = null;
+  let magicLink = null;
+  for (const m of pool.slice(0, 6)) {
+    if (!emailOtp)  emailOtp  = extractOtpServer(m.subject, m.text_body, m.html_body);
+    if (!magicLink) magicLink = extractMagicLinkServer(m.text_body, m.html_body);
+    if (emailOtp && magicLink) break;
+  }
 
   return {
     id: row.id,
@@ -1973,7 +2194,7 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
     expires_at: row.expires_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    message_count: cntRow ? cntRow.n : 0,
+    message_count: svcMsgs.length ? svcMsgs.length : allMsgs.length,
     email_otp: emailOtp,
     magic_link: magicLink,
     latest_message_id: latest ? latest.id : null,
@@ -1986,16 +2207,39 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
 async function handleMatrixApi(request, env, url, user, p, method) {
   const t = now();
 
-  // GET /api/matrix — list all matrix accounts for the current user
-  if (p === "/api/matrix" && method === "GET") {
+  // POST /api/matrix/sync — auto-discover & import accounts from existing inboxes & messages
+  if (p === "/api/matrix/sync" && method === "POST") {
+    const added = await syncMatrixFromInboxes(env, user.id, t);
     const { results } = await env.DB.prepare(
-      `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY created_at DESC LIMIT 300`
+      `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY updated_at DESC, created_at DESC LIMIT 300`
     ).bind(user.id).all();
     const list = [];
     for (const r of results || []) {
       list.push(await enrichMatrixAccount(env, r, t));
     }
-    return json({ accounts: list });
+    return json({ ok: true, added, accounts: list });
+  }
+
+  // GET /api/matrix — list all matrix accounts for the current user (auto-syncs if empty or ?sync=1)
+  if (p === "/api/matrix" && method === "GET") {
+    let { results } = await env.DB.prepare(
+      `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY updated_at DESC, created_at DESC LIMIT 300`
+    ).bind(user.id).all();
+    let autoSynced = 0;
+    if (!results || results.length === 0 || url.searchParams.get("sync") === "1") {
+      autoSynced = await syncMatrixFromInboxes(env, user.id, t);
+      if (autoSynced > 0) {
+        const res2 = await env.DB.prepare(
+          `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY updated_at DESC, created_at DESC LIMIT 300`
+        ).bind(user.id).all();
+        results = res2.results || [];
+      }
+    }
+    const list = [];
+    for (const r of results || []) {
+      list.push(await enrichMatrixAccount(env, r, t));
+    }
+    return json({ accounts: list, auto_synced: autoSynced });
   }
 
   // POST /api/matrix — 1-Click Spawn Identity or Add Account

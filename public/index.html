@@ -369,6 +369,13 @@
   .mx-pull-btn:hover{background:var(--raised);color:var(--text);border-color:var(--control)}
   .mx-grid-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-top:10px}
   .mx-grid-form input,.mx-grid-form select{height:36px;padding:0 10px;border:1px solid var(--border);background:var(--surface);border-radius:var(--radius-control);font-size:13px;min-width:0;width:100%}
+  .mx-presets{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0 6px}
+  .mx-presets-lbl{font-size:12px;font-weight:600;color:var(--muted);margin-right:2px}
+  .mx-preset-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 10px;border:1px solid var(--border);border-radius:999px;background:var(--raised);color:var(--text);font-size:12px;font-weight:500;cursor:pointer;transition:all .12s;white-space:nowrap}
+  .mx-preset-btn:hover{border-color:var(--accent);background:var(--active);color:var(--accent)}
+  .mx-adv{margin-top:10px;border-top:1px dashed var(--rule);padding-top:8px}
+  .mx-adv summary{font-size:12px;color:var(--muted);cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:6px;font-weight:500}
+  .mx-adv summary:hover{color:var(--text)}
   .setup{margin-top:var(--gap)}
   .setup-grid{display:grid;gap:var(--gap);grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}
   .panel{border:1px solid var(--border);border-radius:var(--radius-card);padding:18px 18px 20px;background:var(--surface)}
@@ -1113,13 +1120,28 @@
 
     <section id="matrixView" hidden>
       <div class="panel">
-        <h2 class="panel-title">1-Click Spawn Identity &amp; Account Vault</h2>
-        <p class="hint" style="margin:0 0 8px">Otomatis membuat inbox permanen di menyurat.me, meng-generate username &amp; password kuat, menjalankan live 2FA TOTP, serta menarik OTP email &amp; magic link secara langsung.</p>
-        <div class="mx-grid-form">
-          <input id="mxService" placeholder="Layanan (mis. Steam, GitHub, Cursor)" maxlength="60" autocomplete="off" aria-label="Layanan">
-          <input id="mxTag" placeholder="Tag (mis. #Alt-01, #Trial)" maxlength="40" autocomplete="off" aria-label="Tag">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+          <h2 class="panel-title" style="margin:0">⚡ 1-Click Auto-Spawn &amp; Auto-Detected Vault</h2>
+          <span class="chip ok">Otomatis mendeteksi layanan dari setiap email masuk</span>
+        </div>
+        <p class="hint" style="margin:0 0 8px">Klik salah satu tombol layanan di bawah untuk langsung membuat email permanen + username + password 18-karakter dalam 1 klik (tanpa ketik manual), atau biarkan sistem mendeteksi otomatis saat ada email verifikasi masuk.</p>
+
+        <div class="mx-presets" id="mxPresetBar">
+          <span class="mx-presets-lbl">1-Klik Instan:</span>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Claude (Anthropic)" data-mx-days="0">⚡ + Claude</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="OpenAI" data-mx-days="0">⚡ + OpenAI</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Cursor" data-mx-days="14">⚡ + Cursor (14d)</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Mistral AI" data-mx-days="0">⚡ + Mistral AI</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="AWS" data-mx-days="0">⚡ + AWS</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Qwen AI" data-mx-days="0">⚡ + Qwen AI</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="GitHub" data-mx-days="0">⚡ + GitHub</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Steam" data-mx-days="0">⚡ + Steam</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Vercel" data-mx-days="0">⚡ + Vercel</button>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Supabase" data-mx-days="0">⚡ + Supabase</button>
+        </div>
+
+        <div class="mx-grid-form" style="grid-template-columns:minmax(150px,1fr) minmax(140px,1fr) minmax(180px,1.4fr) auto">
           <select id="mxDomain" aria-label="Domain email"></select>
-          <input id="mxLocal" placeholder="Nama email (kosong = acak)" maxlength="64" autocomplete="off" aria-label="Nama lokal email">
           <select id="mxTrial" aria-label="Masa aktif / trial">
             <option value="0">Permanen (Active)</option>
             <option value="3">Trial 3 hari</option>
@@ -1128,14 +1150,21 @@
             <option value="30">Trial 30 hari</option>
             <option value="90">Trial 90 hari</option>
           </select>
+          <input id="mxService" placeholder="Atau ketik layanan lain (mis. Discord, DigitalOcean)…" maxlength="60" autocomplete="off" aria-label="Layanan">
+          <button class="btn btn-primary" id="mxSpawnBtn" type="button" style="height:36px;padding:0 16px">⚡ Spawn Akun</button>
         </div>
-        <div class="mx-grid-form">
-          <input id="mxUser" placeholder="Username (kosong = otomatis)" maxlength="80" autocomplete="off" aria-label="Username">
-          <input id="mxPass" placeholder="Password (kosong = auto 18-char kuat)" maxlength="200" autocomplete="off" aria-label="Password">
-          <input id="mxTotp" placeholder="2FA TOTP Secret / otpauth:// (opsional)" maxlength="200" autocomplete="off" aria-label="2FA TOTP Secret">
-          <input id="mxOpsec" placeholder="Catatan OPSEC (mis. Brave #3 · Proxy SG)" maxlength="300" autocomplete="off" aria-label="Catatan OPSEC">
-          <button class="btn btn-primary" id="mxSpawnBtn" type="button" style="height:36px">+ Spawn Akun</button>
-        </div>
+
+        <details class="mx-adv">
+          <summary>⚙️ Opsi Kustom / Input Manual (Tag, Nama Email, Username, Password, 2FA TOTP, Catatan OPSEC)</summary>
+          <div class="mx-grid-form" style="margin-top:8px">
+            <input id="mxTag" placeholder="Tag (mis. #Alt-01, #Trial)" maxlength="40" autocomplete="off" aria-label="Tag">
+            <input id="mxLocal" placeholder="Nama email (kosong = acak natural)" maxlength="64" autocomplete="off" aria-label="Nama lokal email">
+            <input id="mxUser" placeholder="Username (kosong = otomatis)" maxlength="80" autocomplete="off" aria-label="Username">
+            <input id="mxPass" placeholder="Password (kosong = auto 18-char kuat)" maxlength="200" autocomplete="off" aria-label="Password">
+            <input id="mxTotp" placeholder="2FA TOTP Secret / otpauth:// (opsional)" maxlength="200" autocomplete="off" aria-label="2FA TOTP Secret">
+            <input id="mxOpsec" placeholder="Catatan OPSEC (mis. Brave #3 · Proxy SG)" maxlength="300" autocomplete="off" aria-label="Catatan OPSEC">
+          </div>
+        </details>
         <div class="auth-msg" id="mxSpawnMsg" hidden></div>
       </div>
 
@@ -1148,6 +1177,7 @@
           <option value="cooldown">Cooldown</option>
           <option value="burned">Burned / Suspended</option>
         </select>
+        <button class="btn" id="mxSyncBtn" type="button" style="height:36px" title="Pindai semua inbox &amp; email masuk untuk mendeteksi akun secara otomatis">⚡ Auto-Sync dari Inbox</button>
         <button class="btn" id="mxRefreshAllBtn" type="button" style="height:36px">🔄 Refresh OTP</button>
       </div>
 
@@ -3024,12 +3054,36 @@ async function loadMatrix(){
   try {
     const j = await api("/api/matrix");
     state.matrixList = j.accounts || [];
+    if (j.auto_synced && j.auto_synced > 0) {
+      toast("⚡ Auto-Sync: " + j.auto_synced + " akun terdeteksi otomatis dari inbox");
+    }
   } catch {
     state.matrixList = [];
   }
   if ($("navMatrix")) $("navMatrix").textContent = String(state.matrixList.length);
   renderMatrix();
   if (state.view === "matrix") renderTitle();
+}
+
+async function syncMatrixNow(){
+  const btn = $("mxSyncBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const j = await api("/api/matrix/sync", { method: "POST" });
+    state.matrixList = j.accounts || [];
+    if ($("navMatrix")) $("navMatrix").textContent = String(state.matrixList.length);
+    renderMatrix();
+    renderTitle();
+    if (j.added > 0) {
+      toast("⚡ " + j.added + " akun baru ditemukan otomatis dari inbox");
+    } else {
+      toast("Semua akun dari inbox sudah tersinkron (" + state.matrixList.length + " akun)");
+    }
+  } catch (e) {
+    toast("Gagal sinkronisasi: " + e.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function mxStatusBadge(a){
@@ -3174,19 +3228,22 @@ function renderMatrix(){
   tickMatrixTotp();
 }
 
-async function spawnMatrixAccount(){
+async function spawnMatrixAccount(presetService, presetDays){
   const msg = $("mxSpawnMsg");
   if (msg) msg.hidden = true;
-  const service = ($("mxService") && $("mxService").value || "").trim();
+  const isPreset = typeof presetService === "string" && presetService.length > 0;
+  const service = isPreset ? presetService : (($("mxService") && $("mxService").value || "").trim());
   if (!service) {
-    if (msg) showMsg(msg, "Nama layanan/platform wajib diisi (mis. Steam, GitHub, Cursor).", "err");
+    if (msg) showMsg(msg, "Pilih tombol 1-Klik Instan di atas atau ketik nama layanan.", "err");
     if ($("mxService")) $("mxService").focus();
     return;
   }
   const btn = $("mxSpawnBtn");
   if (btn) btn.disabled = true;
   try {
-    const trialDays = Number($("mxTrial") ? $("mxTrial").value : 0);
+    const trialDays = (isPreset && presetDays !== undefined)
+      ? Number(presetDays)
+      : Number($("mxTrial") ? $("mxTrial").value : 0);
     const j = await api("/api/matrix", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -3209,7 +3266,7 @@ async function spawnMatrixAccount(){
       if ($(id)) $(id).value = "";
     }
     try { await navigator.clipboard.writeText(acc.address); } catch {}
-    toast("Spawn sukses! Email disalin: " + acc.address);
+    toast("⚡ Spawn " + acc.service + " sukses! Email disalin: " + acc.address);
     await loadMatrix();
     loadAddresses();
   } catch (e) {
@@ -4174,7 +4231,11 @@ on("whClose", "click", () => { const d = $("whDlg"); if (d) d.close(); });
 on("whAdd", "click", addWebhook);
 on("annBtn", "click", createAnnouncement);
 on("addrSearch", "input", (e) => { state.addrQuery = e.target.value; renderAddresses(); });
-on("mxSpawnBtn", "click", spawnMatrixAccount);
+on("mxSpawnBtn", "click", () => spawnMatrixAccount());
+on("mxService", "keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); spawnMatrixAccount(); } });
+on("mxSyncBtn", "click", syncMatrixNow);
+document.querySelectorAll("[data-mx-quick]").forEach((b) =>
+  b.addEventListener("click", () => spawnMatrixAccount(b.dataset.mxQuick, b.dataset.mxDays)));
 on("mxSearch", "input", (e) => { state.mxQuery = e.target.value; renderMatrix(); });
 on("mxStatusFilter", "change", (e) => { state.mxStatus = e.target.value; renderMatrix(); });
 on("mxRefreshAllBtn", "click", () => { loadMatrix(); toast("Memperbarui semua OTP Matrix…"); });
