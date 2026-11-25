@@ -333,7 +333,8 @@
   .aitem .addr-open .addr-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .aitem .addr-open:hover .addr-txt{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
   .aitem.live .addr-open .addr-txt{font-weight:600;color:var(--accent)}
-  .aitem .meta{display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+  .aitem .meta{display:grid;grid-template-columns:76px 148px;gap:8px;align-items:center}
+  .aitem .meta .chip{justify-content:center;text-align:center;font-variant-numeric:tabular-nums;width:100%}
   .aitem .acts{display:flex;gap:6px;align-items:center;justify-content:flex-end;position:relative}
   .aitem .more-btn{min-width:32px;padding:0 10px;font-size:15px;font-weight:600;line-height:1}
   .setup{margin-top:var(--gap)}
@@ -537,7 +538,8 @@
     .aitem .sel{grid-column:1;grid-row:1}
     .aitem .addr{grid-column:2;grid-row:1}
     .aitem .addr-open .addr-txt{white-space:normal;word-break:break-all}
-    .aitem .meta{grid-column:2;grid-row:2;justify-content:flex-start}
+    .aitem .meta{display:flex;grid-column:2;grid-row:2;justify-content:flex-start;gap:6px}
+    .aitem .meta .chip{width:auto}
     .aitem .acts{grid-column:3;grid-row:1 / span 2;align-self:center}
     .row-input input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),.row-input select{flex:1 1 100%;height:40px}
     .switch{flex:1 1 calc(50% - 6px);height:40px}
