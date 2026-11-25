@@ -1914,35 +1914,120 @@ function generateStrongPassword(len = 18) {
   return chars.join("");
 }
 
+function cleanHtmlToPlainText(html) {
+  if (!html) return "";
+  return String(html)
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<head[\s\S]*?<\/head>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractOtpServer(subject, textBody, htmlBody) {
-  const plainHtml = htmlBody ? String(htmlBody).replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ") : "";
-  const combined = `${subject || ""}\n${textBody || ""}\n${plainHtml}`.slice(0, 16000);
-  const ctxRe = /(?:otp|kode|code|verifikasi|verification|pin|passcode|token|sandi|confirm|security)[^0-9A-Za-z]{0,28}\b([0-9]{4,8})\b/gi;
+  const subj = String(subject || "").trim();
+  const cleanHtml = htmlBody ? cleanHtmlToPlainText(htmlBody) : "";
+  // Prefer cleanHtml if textBody looks polluted with raw CSS rules from older MIME parser
+  const rawTxt = String(textBody || "");
+  const cssPolluted = /@font-face|\bbox-sizing\s*:|mso-table-lspace|\bmargin\s*:\s*0/i.test(rawTxt);
+  const body = ((cssPolluted && cleanHtml) ? cleanHtml : (rawTxt || cleanHtml))
+    .replace(/#[0-9a-fA-F]{3,8}\b/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .slice(0, 12000);
+  const combined = `${subj} \n ${body}`;
+  const hasCtx = /\b(otp|kode|code|pin|verifikasi|verification|verify|passcode|token|authenticat|masuk|login|sign[\s-]?in|confirm|konfirmasi|sandi|password|security|aktivasi|activate)\b/i.test(combined);
+  if (!hasCtx) return null;
+
+  // 1. Explicit pattern right after keyword (e.g. "Login Code: 036688", "verification code is G-582910")
+  const explicitRe = /\b(?:kode\s*(?:otp|verifikasi|keamanan|akses)?|verification\s*code|security\s*code|confirmation\s*code|login\s*code|sign[-\s]?in\s*code|passcode|one[-\s]?time\s*(?:password|code)|otp|pin|code|kode)\b[^0-9A-Za-z\n]{0,32}(?:G-)?\b(\d{4,8}|[A-Z0-9]{6,8})\b/gi;
   let m;
-  while ((m = ctxRe.exec(combined)) !== null) {
-    const c = m[1];
-    if (!/^(19\d\d|20[2-3]\d)$/.test(c)) return c;
+  while ((m = explicitRe.exec(combined)) !== null) {
+    const cand = m[1];
+    if (/^\d{4,8}$/.test(cand)) {
+      const n = Number(cand);
+      if (cand.length === 4 && n >= 1990 && n <= 2035) continue;
+      return cand;
+    }
+    if (/^(?=.*\d)[A-Z0-9]{6,8}$/.test(cand)) return cand;
   }
+
+  // 2. Pattern before keyword (e.g. "544654 is your verification code", "482910 adalah kode verifikasi")
+  const beforeRe = /\b(\d{4,8})\b[^0-9A-Za-z\n]{0,24}\b(?:adalah\s+kode|is\s+your\s+(?:verification|security|login|sign[-\s]?in|confirmation|one-time|temporary)?\s*(?:code|otp|pin))\b/i.exec(combined);
+  if (beforeRe) return beforeRe[1];
+
+  // 3. Fallback: 6-digit number in subject or body when verification context is present
+  const sixSubj = /\b(\d{6})\b/.exec(subj);
+  if (sixSubj && !/^(19\d\d|20[2-3]\d|000000)$/.test(sixSubj[1])) return sixSubj[1];
   const sixRe = /\b([0-9]{6})\b/g;
-  while ((m = sixRe.exec(combined)) !== null) {
+  while ((m = sixRe.exec(body)) !== null) {
     const c = m[1];
     if (!/^(19\d\d|20[2-3]\d|000000)$/.test(c)) return c;
   }
   return null;
 }
 
-function extractMagicLinkServer(textBody, htmlBody) {
-  const src = `${htmlBody || ""}\n${textBody || ""}`.slice(0, 32000);
-  const re = /https?:\/\/[^\s"'<>)\]]+/gi;
-  const skipRe = /\.(png|jpe?g|gif|svg|webp|css|js|woff2?|ico)(\?|$)|unsubscribe|privacy|terms|mailto:|w3\.org|schemas\.microsoft/i;
-  const hitRe = /(verify|confirm|activate|magic|token=|code=|auth|login|verifikasi|aktivasi|reset|accept|invite|validate|callback|click)/i;
-  let m;
-  while ((m = re.exec(src)) !== null) {
-    const u = m[0].replace(/[.,;:'")\]>]+$/, "").replace(/&amp;/g, "&");
-    if (u.length < 16 || skipRe.test(u)) continue;
-    if (hitRe.test(u)) return u;
+function extractMagicLinkServer(subject, textBody, htmlBody, hasExtractedOtp = false) {
+  const subj = String(subject || "");
+  // If this email is strictly a numeric verification/login code email and we already extracted the OTP,
+  // avoid returning generic footer/login links unless it's an explicit magic-link email.
+  if (hasExtractedOtp && /\b(verification\s+code|sign[-\s]?in\s+code|login\s+code|kode\s+otp|is\s+your\s+verification\s+code)\b/i.test(subj)) {
+    return null;
   }
-  return null;
+
+  const skipHostRe = /^(click|links?|trk|track|metrics|pixel|open|ablink|email\.mg|url\d+)\.|mandrillapp\.com|sendgrid\.net|list-manage\.com|customeriomail\.com|braze\.com|aklamio\.com/i;
+  const skipUrlRe = /\.(png|jpe?g|gif|svg|webp|css|js|woff2?|ttf|eot|ico|pdf)(\?|$)|unsubscribe|berhenti|privacy|privasi|terms|ketentuan|help\.|support\.|status\.|preferences|manage|billing|invoice|mailto:|w3\.org|schema\.org|schemas\.microsoft|facebook\.com|twitter\.com|x\.com|instagram\.com|linkedin\.com|youtube\.com|tiktok\.com|fonts\.googleapis|fonts\.gstatic/i;
+  const tokenQueryRe = /([?&](token|code|key|ticket|magic|verify|confirmation|confirmation_token|access_token|auth|state)=|\/verify\/|\/confirm\/|\/activate\/|\/magic[-_]?link|\/auth\/callback|\/reset[-_]?password)/i;
+  const labelActionRe = /\b(verify|verifikasi|confirm|konfirmasi|activate|aktivasi|magic\s*link|secure\s*link|sign\s*in\s*to|log\s*in\s*to|masuk\s*ke|reset\s*password|accept\s*invite|complete\s*registration)\b/i;
+
+  const candidates = [];
+
+  if (htmlBody) {
+    const aRe = /<a\b[^>]*?\bhref\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = aRe.exec(htmlBody)) !== null) {
+      const rawUrl = (m[1] || m[2] || "").replace(/&amp;/g, "&").trim();
+      const label = cleanHtmlToPlainText(m[3] || "");
+      if (!/^https?:\/\//i.test(rawUrl) || rawUrl.length < 22) continue;
+      if (skipUrlRe.test(rawUrl) || skipUrlRe.test(label)) continue;
+      let uObj;
+      try { uObj = new URL(rawUrl); } catch { continue; }
+      const host = uObj.hostname.toLowerCase();
+      if (skipHostRe.test(host) && !tokenQueryRe.test(rawUrl)) continue;
+      const pathAndQuery = (uObj.pathname || "") + (uObj.search || "");
+      if (pathAndQuery.length <= 6) continue;
+
+      let score = 0;
+      if (tokenQueryRe.test(rawUrl)) score += 6;
+      if (labelActionRe.test(label)) score += 5;
+      if (/\b(secure\s+link|confirm\s+your\s+email|verify\s+your)\b/i.test(subj) && label.length > 2) score += 3;
+      if (score >= 6) {
+        candidates.push({ url: rawUrl, score });
+      }
+    }
+  }
+
+  if (!candidates.length && textBody) {
+    const uRe = /https?:\/\/[^\s"'<>)\]]+/gi;
+    let m;
+    while ((m = uRe.exec(textBody)) !== null) {
+      const rawUrl = m[0].replace(/[.,;:'")\]>]+$/, "").replace(/&amp;/g, "&");
+      if (rawUrl.length < 24 || skipUrlRe.test(rawUrl)) continue;
+      let uObj;
+      try { uObj = new URL(rawUrl); } catch { continue; }
+      if (skipHostRe.test(uObj.hostname.toLowerCase()) && !tokenQueryRe.test(rawUrl)) continue;
+      if (tokenQueryRe.test(rawUrl)) {
+        candidates.push({ url: rawUrl, score: 6 });
+      }
+    }
+  }
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].url;
 }
 
 const MATRIX_SERVICE_RULES = [
@@ -2040,6 +2125,7 @@ async function autoRegisterMatrixFromEmail(env, userId, inboxAddr, fromAddr, fro
 
   const detStatus = detectStatusFromSubjects([subject || ""]);
   if (existing) {
+    if (existing.status === "archived") return;
     const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && existing.status === "active" ? "cooldown" : existing.status);
     await env.DB.prepare(
       `UPDATE matrix_accounts SET status = ?2, updated_at = ?3 WHERE id = ?1`
@@ -2139,7 +2225,19 @@ async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
   return added;
 }
 
-async function enrichMatrixAccount(env, row, nowMs = now()) {
+async function fetchInboxMessagesForMatrix(env, address) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, from_addr, from_name, subject, received_at,
+            SUBSTR(COALESCE(text_body, ''), 1, 12000) AS text_body,
+            SUBSTR(COALESCE(html_body, ''), 1, 65000) AS html_body
+       FROM messages
+      WHERE inbox = ?1
+      ORDER BY received_at DESC LIMIT 25`
+  ).bind(address).all();
+  return results || [];
+}
+
+async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null) {
   let totpCode = null;
   let totpRem  = null;
   if (row.totp_secret) {
@@ -2148,16 +2246,7 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
       totpRem  = 30 - (Math.floor(nowMs / 1000) % 30);
     } catch {}
   }
-  const { results: recentMsgs } = await env.DB.prepare(
-    `SELECT id, from_addr, from_name, subject, received_at,
-            SUBSTR(COALESCE(text_body, ''), 1, 8000) AS text_body,
-            SUBSTR(COALESCE(html_body, ''), 1, 16000) AS html_body
-       FROM messages
-      WHERE inbox = ?1
-      ORDER BY received_at DESC LIMIT 25`
-  ).bind(row.address).all();
-
-  const allMsgs = recentMsgs || [];
+  const allMsgs = preloadedMsgs || await fetchInboxMessagesForMatrix(env, row.address);
   const targetSvc = String(row.service || "").trim().toLowerCase();
   const svcMsgs = allMsgs.filter((m) => {
     const det = detectServiceFromEmail(m.from_addr, m.from_name, m.subject);
@@ -2166,14 +2255,17 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
     return targetSvc.length >= 3 && hay.includes(targetSvc);
   });
 
-  const pool = svcMsgs.length ? svcMsgs : allMsgs;
+  // Prevent cross-service OTP leakage on shared inboxes: only fallback to unclaimed messages
+  const unclaimedMsgs = allMsgs.filter((m) => !detectServiceFromEmail(m.from_addr, m.from_name, m.subject));
+  const pool = svcMsgs.length ? svcMsgs : unclaimedMsgs;
   const latest = pool[0] || null;
 
   let emailOtp  = null;
   let magicLink = null;
   for (const m of pool.slice(0, 6)) {
-    if (!emailOtp)  emailOtp  = extractOtpServer(m.subject, m.text_body, m.html_body);
-    if (!magicLink) magicLink = extractMagicLinkServer(m.text_body, m.html_body);
+    const mOtp = !emailOtp ? extractOtpServer(m.subject, m.text_body, m.html_body) : null;
+    if (mOtp) emailOtp = mOtp;
+    if (!magicLink) magicLink = extractMagicLinkServer(m.subject, m.text_body, m.html_body, Boolean(mOtp || emailOtp));
     if (emailOtp && magicLink) break;
   }
 
@@ -2194,7 +2286,7 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
     expires_at: row.expires_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    message_count: svcMsgs.length ? svcMsgs.length : allMsgs.length,
+    message_count: svcMsgs.length ? svcMsgs.length : unclaimedMsgs.length,
     email_otp: emailOtp,
     magic_link: magicLink,
     latest_message_id: latest ? latest.id : null,
@@ -2204,6 +2296,19 @@ async function enrichMatrixAccount(env, row, nowMs = now()) {
   };
 }
 
+async function enrichMatrixAccountList(env, rows, nowMs = now()) {
+  const arr = rows || [];
+  if (!arr.length) return [];
+  const uniqueAddrs = [...new Set(arr.map((r) => r.address))];
+  const msgMap = new Map();
+  await Promise.all(
+    uniqueAddrs.map(async (addr) => {
+      msgMap.set(addr, await fetchInboxMessagesForMatrix(env, addr));
+    })
+  );
+  return Promise.all(arr.map((r) => enrichMatrixAccount(env, r, nowMs, msgMap.get(r.address))));
+}
+
 async function handleMatrixApi(request, env, url, user, p, method) {
   const t = now();
 
@@ -2211,34 +2316,31 @@ async function handleMatrixApi(request, env, url, user, p, method) {
   if (p === "/api/matrix/sync" && method === "POST") {
     const added = await syncMatrixFromInboxes(env, user.id, t);
     const { results } = await env.DB.prepare(
-      `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY updated_at DESC, created_at DESC LIMIT 300`
+      `SELECT * FROM matrix_accounts WHERE user_id = ?1 AND status != 'archived' ORDER BY updated_at DESC, created_at DESC LIMIT 300`
     ).bind(user.id).all();
-    const list = [];
-    for (const r of results || []) {
-      list.push(await enrichMatrixAccount(env, r, t));
-    }
+    const list = await enrichMatrixAccountList(env, results || [], t);
     return json({ ok: true, added, accounts: list });
   }
 
   // GET /api/matrix — list all matrix accounts for the current user (auto-syncs if empty or ?sync=1)
   if (p === "/api/matrix" && method === "GET") {
     let { results } = await env.DB.prepare(
-      `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY updated_at DESC, created_at DESC LIMIT 300`
+      `SELECT * FROM matrix_accounts WHERE user_id = ?1 AND status != 'archived' ORDER BY updated_at DESC, created_at DESC LIMIT 300`
     ).bind(user.id).all();
     let autoSynced = 0;
-    if (!results || results.length === 0 || url.searchParams.get("sync") === "1") {
+    const totalRow = (!results || results.length === 0)
+      ? await env.DB.prepare(`SELECT COUNT(*) AS n FROM matrix_accounts WHERE user_id = ?1`).bind(user.id).first()
+      : { n: results.length };
+    if ((totalRow ? totalRow.n : 0) === 0 || url.searchParams.get("sync") === "1") {
       autoSynced = await syncMatrixFromInboxes(env, user.id, t);
       if (autoSynced > 0) {
         const res2 = await env.DB.prepare(
-          `SELECT * FROM matrix_accounts WHERE user_id = ?1 ORDER BY updated_at DESC, created_at DESC LIMIT 300`
+          `SELECT * FROM matrix_accounts WHERE user_id = ?1 AND status != 'archived' ORDER BY updated_at DESC, created_at DESC LIMIT 300`
         ).bind(user.id).all();
         results = res2.results || [];
       }
     }
-    const list = [];
-    for (const r of results || []) {
-      list.push(await enrichMatrixAccount(env, r, t));
-    }
+    const list = await enrichMatrixAccountList(env, results || [], t);
     return json({ accounts: list, auto_synced: autoSynced });
   }
 
@@ -2260,6 +2362,9 @@ async function handleMatrixApi(request, env, url, user, p, method) {
       if (dom.error) return json(dom, 400);
       domainName = dom.domain;
       if (!validLocal(localPart)) return json({ error: "invalid_local", note: "Bagian lokal email minimal 3 karakter." }, 400);
+      if (!isStaff(user) && isReservedLocal(localPart)) {
+        return json({ error: "local_reserved", note: "Nama alamat ini dicadangkan sistem." }, 400);
+      }
       fullAddress = `${localPart}@${domainName}`;
     } else {
       const dom = await resolveDomain(env, b.domain);
@@ -2268,6 +2373,9 @@ async function handleMatrixApi(request, env, url, user, p, method) {
       if (b.local && String(b.local).trim()) {
         localPart = normalizeLocal(b.local);
         if (!validLocal(localPart)) return json({ error: "invalid_local", note: "Nama lokal minimal 3 karakter (a-z, 0-9, ., _, -)." }, 400);
+        if (!isStaff(user) && isReservedLocal(localPart)) {
+          return json({ error: "local_reserved", note: "Nama alamat ini dicadangkan sistem." }, 400);
+        }
         fullAddress = `${localPart}@${domainName}`;
       } else {
         // Auto-spawn natural human address that isn't owned by another user
@@ -2288,13 +2396,24 @@ async function handleMatrixApi(request, env, url, user, p, method) {
       }
     }
 
+    const domInfo = await getDomain(env, domainName);
+    if (domInfo && domInfo.is_premium && user.role === "member") {
+      return json({ error: "domain_premium", note: "Domain ini khusus untuk pengguna VIP ke atas." }, 403);
+    }
+    const existingBox = await inboxRow(env, fullAddress);
+    const alreadyOwnActive = existingBox && existingBox.user_id === user.id && (existingBox.expires_at > t || existingBox.pinned === 1);
+    if (!alreadyOwnActive) {
+      const q = await quotaCheck(env, user, domainName);
+      if (q) return json(q, 429);
+    }
+
     // Ensure & auto-pin the inbox in menyurat.me so the account's mailbox never expires
     const boxNote = tag ? `${service} (${tag})` : service;
     const ensured = await ensureInbox(env, fullAddress, domainName, user.id, ttlFor(user, null), boxNote);
     if (ensured.conflict) {
       return json({ error: "address_taken", note: "Alamat inbox sudah dipakai pengguna lain." }, 409);
     }
-    if (b.auto_pin !== false) {
+    if (b.auto_pin !== false && user.role !== "member") {
       await env.DB.prepare(`UPDATE inboxes SET pinned = 1 WHERE address = ?1`).bind(fullAddress).run();
     }
 
@@ -2392,7 +2511,7 @@ async function handleMatrixApi(request, env, url, user, p, method) {
       const apiKey   = b.api_key !== undefined ? (String(b.api_key || "").trim().slice(0, 500) || null) : row.api_key;
       const recCodes = b.recovery_codes !== undefined ? (String(b.recovery_codes || "").trim().slice(0, 1000) || null) : row.recovery_codes;
       const opsecNote = b.opsec_note !== undefined ? (String(b.opsec_note || "").trim().slice(0, 300) || null) : row.opsec_note;
-      const allowedStatus = ["active", "trial", "cooldown", "burned"];
+      const allowedStatus = ["active", "trial", "cooldown", "burned", "archived"];
       const status = (b.status && allowedStatus.includes(b.status)) ? b.status : row.status;
 
       let expiresAt = row.expires_at;
@@ -2419,7 +2538,12 @@ async function handleMatrixApi(request, env, url, user, p, method) {
     }
 
     if (method === "DELETE") {
-      await env.DB.prepare(`DELETE FROM matrix_accounts WHERE id = ?1`).bind(id).run();
+      if (url.searchParams.get("hard") === "1") {
+        await env.DB.prepare(`DELETE FROM matrix_accounts WHERE id = ?1`).bind(id).run();
+      } else {
+        // Soft-tombstone so Auto-Sync and incoming newsletter hooks never re-import deleted rows
+        await env.DB.prepare(`UPDATE matrix_accounts SET status = 'archived', updated_at = ?2 WHERE id = ?1`).bind(id, t).run();
+      }
       if (url.searchParams.get("delete_inbox") === "1") {
         const box = await inboxRow(env, row.address);
         if (box && box.user_id === user.id) {

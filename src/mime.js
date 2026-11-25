@@ -235,7 +235,20 @@ export function parseEmail(raw) {
   }
 
   if (!out.text && out.html) {
-    out.text = out.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    out.text = out.html
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<head[\s\S]*?<\/head>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+      .replace(/\s+/g, " ")
+      .trim();
   }
   if (out.text === null) out.text = "";
   return out;
