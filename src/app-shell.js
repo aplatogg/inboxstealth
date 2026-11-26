@@ -285,7 +285,7 @@ export const APP_SHELL_HTML = `
           <button type="button" class="mx-preset-btn" data-mx-quick="Supabase" data-mx-days="0">⚡ + Supabase</button>
         </div>
 
-        <div class="mx-grid-form" style="grid-template-columns:minmax(150px,1fr) minmax(140px,1fr) minmax(180px,1.4fr) auto">
+        <div class="mx-grid-form mx-spawn-main">
           <select id="mxDomain" aria-label="Domain email"></select>
           <select id="mxTrial" aria-label="Masa aktif / trial">
             <option value="0">Permanen (Active)</option>
@@ -296,7 +296,7 @@ export const APP_SHELL_HTML = `
             <option value="90">Trial 90 hari</option>
           </select>
           <input id="mxService" placeholder="Ketik judul sendiri / web baru (kosongkan = Auto-Detect)…" maxlength="60" autocomplete="off" aria-label="Layanan">
-          <button class="btn btn-primary" id="mxSpawnBtn" type="button" style="height:36px;padding:0 16px">⚡ Spawn Akun</button>
+          <button class="btn btn-primary" id="mxSpawnBtn" type="button">⚡ Spawn Akun</button>
         </div>
 
         <details class="mx-adv">
