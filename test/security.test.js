@@ -11,6 +11,7 @@ import worker, {
   failLogin,
   clearLogin,
   canSee,
+  isVaultConfigured,
   encryptVaultField,
   decryptVaultField,
   extractOtpServer,
@@ -303,6 +304,29 @@ describe("4. Owner vs Admin Hierarchy & AES-256-GCM Vault Encryption", () => {
 
     // Backward compatibility with legacy plaintext
     expect(await decryptVaultField(env, "legacy-plain")).toBe("legacy-plain");
+  });
+
+  it("fails closed when VAULT_SECRET is missing (never falls back to TURNSTILE_SECRET, TURNSTILE_SITE_KEY, or OWNER_EMAIL)", async () => {
+    const unconfiguredEnv = {
+      TURNSTILE_SECRET: "turnstile-secret-should-not-be-used",
+      TURNSTILE_SITE_KEY: "0x4AAAAAAGNUDG7zF2BQ0yYk",
+      OWNER_EMAIL: "owner@menyurat.me",
+    };
+    expect(isVaultConfigured(unconfiguredEnv)).toBe(false);
+    expect(await encryptVaultField(unconfiguredEnv, "SensitivePass123!")).toBeNull();
+
+    const validEnv = { VAULT_SECRET: "32-byte-dedicated-vault-secret-key-2026" };
+    expect(isVaultConfigured(validEnv)).toBe(true);
+    const cipher = await encryptVaultField(validEnv, "SensitivePass123!");
+    expect(cipher).toMatch(/^enc:v1:/);
+    // Without VAULT_SECRET, decryptVaultField returns null without crashing
+    expect(await decryptVaultField(unconfiguredEnv, cipher)).toBeNull();
+
+    // /api/health reports vault status accurately
+    const resUnconf = await worker.fetch(new Request("https://menyurat.me/api/health"), unconfiguredEnv);
+    expect((await resUnconf.json()).vault).toBe("unconfigured");
+    const resConf = await worker.fetch(new Request("https://menyurat.me/api/health"), validEnv);
+    expect((await resConf.json()).vault).toBe("ok");
   });
 
   it("prevents email enumeration on /api/auth/register by returning 201 generic pending message", async () => {

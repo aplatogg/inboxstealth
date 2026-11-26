@@ -11,12 +11,12 @@ import { handleScheduled } from "./cron.js";
 import {
   now, json, corsFor, isValidCsrfRequest, currentUser,
   cspForHtml, harden, hitLogin, failLogin, clearLogin, safeAttachmentMime,
-  canSee, encryptVaultField, decryptVaultField
+  canSee, isVaultConfigured, encryptVaultField, decryptVaultField
 } from "./utils.js";
 
 export {
   isValidCsrfRequest, isSafeWebhookUrl, resolveAndValidateWebhookHost, safeAttachmentMime,
-  hitLogin, failLogin, clearLogin, canSee, encryptVaultField, decryptVaultField,
+  hitLogin, failLogin, clearLogin, canSee, isVaultConfigured, encryptVaultField, decryptVaultField,
   extractOtpServer, extractMagicLinkServer, detectServiceFromEmail, ingest
 };
 
@@ -24,7 +24,11 @@ async function handleApi(request, env, url, user) {
   const p = url.pathname, method = request.method;
 
   if (p === "/api/health" && method === "GET") {
-    return json({ ok: true, time: now() });
+    return json({
+      ok: true,
+      time: now(),
+      vault: isVaultConfigured(env) ? "ok" : "unconfigured",
+    });
   }
   if (p.startsWith("/api/auth/")) return handleAuth(request, env, url);
   if (p.startsWith("/api/admin/")) return handleAdmin(request, env, url, user);

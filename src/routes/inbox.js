@@ -9,7 +9,7 @@ import {
   listDomains, getDomain, resolveDomain, inboxRow, purgeInboxContents,
   ensureInbox, inboxRowOrRestoreFromMatrix, canSee, listMessages, getMessage,
   quotaCheck, store, fileGet, fileDel, safeAttachmentMime,
-  encryptVaultField, decryptVaultField
+  isVaultConfigured, encryptVaultField, decryptVaultField
 } from "../utils.js";
 
 /* ---------------- SSE ---------------- */
@@ -340,7 +340,7 @@ export async function ensureMatrixForInbox(env, userId, address, note = null, no
     const cleanSvc = (note && String(note).trim()) ? String(note).trim().slice(0, 60) : "Auto-Detect";
     const localPart = address.split("@")[0] || "user";
     const username = localPart.replace(/[._-]/g, "");
-    const encPw = await encryptVaultField(env, generateStrongPassword(18));
+    const encPw = isVaultConfigured(env) ? await encryptVaultField(env, generateStrongPassword(18)) : null;
     await env.DB.prepare(
       `INSERT INTO matrix_accounts
          (id, user_id, service, tag, address, username, password, totp_secret,
@@ -521,7 +521,7 @@ export async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
     const localPart = addr.split("@")[0] || "user";
     const username = localPart.replace(/[._-]/g, "");
     const t = b.created_at || nowMs;
-    const encPw = await encryptVaultField(env, generateStrongPassword(18));
+    const encPw = isVaultConfigured(env) ? await encryptVaultField(env, generateStrongPassword(18)) : null;
     await env.DB.prepare(
       `INSERT INTO matrix_accounts
          (id, user_id, service, tag, address, username, password, totp_secret,
@@ -547,12 +547,14 @@ async function fetchInboxMessagesForMatrix(env, address) {
 }
 
 async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null, peerServicesOnAddr = null) {
-  // Decrypt sensitive vault fields (and auto-migrate legacy plaintext rows in D1 to AES-256-GCM)
+  // Decrypt sensitive vault fields (and auto-migrate legacy plaintext rows in D1 to AES-256-GCM only when VAULT_SECRET is configured)
   const needsEncryptMigration =
-    (row.password && !String(row.password).startsWith("enc:v1:")) ||
-    (row.totp_secret && !String(row.totp_secret).startsWith("enc:v1:")) ||
-    (row.api_key && !String(row.api_key).startsWith("enc:v1:")) ||
-    (row.recovery_codes && !String(row.recovery_codes).startsWith("enc:v1:"));
+    isVaultConfigured(env) && (
+      (row.password && !String(row.password).startsWith("enc:v1:")) ||
+      (row.totp_secret && !String(row.totp_secret).startsWith("enc:v1:")) ||
+      (row.api_key && !String(row.api_key).startsWith("enc:v1:")) ||
+      (row.recovery_codes && !String(row.recovery_codes).startsWith("enc:v1:"))
+    );
 
   const [plainPassword, plainTotpSecret, plainApiKey, plainRecovery] = await Promise.all([
     decryptVaultField(env, row.password),
@@ -569,9 +571,16 @@ async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null
         encryptVaultField(env, plainApiKey),
         encryptVaultField(env, plainRecovery),
       ]);
-      await env.DB.prepare(
-        `UPDATE matrix_accounts SET password = ?2, totp_secret = ?3, api_key = ?4, recovery_codes = ?5 WHERE id = ?1`
-      ).bind(row.id, ePw, eTotp, eKey, eRec).run();
+      const ok =
+        (!plainPassword || (ePw && ePw.startsWith("enc:v1:"))) &&
+        (!plainTotpSecret || (eTotp && eTotp.startsWith("enc:v1:"))) &&
+        (!plainApiKey || (eKey && eKey.startsWith("enc:v1:"))) &&
+        (!plainRecovery || (eRec && eRec.startsWith("enc:v1:")));
+      if (ok) {
+        await env.DB.prepare(
+          `UPDATE matrix_accounts SET password = ?2, totp_secret = ?3, api_key = ?4, recovery_codes = ?5 WHERE id = ?1`
+        ).bind(row.id, ePw, eTotp, eKey, eRec).run();
+      }
     } catch {}
   }
 
@@ -712,6 +721,9 @@ async function handleMatrixApi(request, env, url, user, p, method) {
   }
 
   if (p === "/api/matrix" && method === "POST") {
+    if (!isVaultConfigured(env)) {
+      return json({ error: "vault_unconfigured", note: "VAULT_SECRET belum dikonfigurasi di server." }, 503);
+    }
     const b = await request.json().catch(() => ({}));
     const service = String(b.service || "").trim().slice(0, 60) || "Auto-Detect";
     const tag = String(b.tag || "").trim().slice(0, 40) || null;
@@ -807,6 +819,14 @@ async function handleMatrixApi(request, env, url, user, p, method) {
       encryptVaultField(env, apiKey),
       encryptVaultField(env, recCodes),
     ]);
+    if (
+      (password && !encPassword) ||
+      (totpSecret && !encTotp) ||
+      (apiKey && !encApiKey) ||
+      (recCodes && !encRecCodes)
+    ) {
+      return json({ error: "vault_unconfigured", note: "Enkripsi vault gagal karena VAULT_SECRET belum dikonfigurasi." }, 503);
+    }
 
     const id = crypto.randomUUID();
     await env.DB.prepare(
@@ -862,6 +882,9 @@ async function handleMatrixApi(request, env, url, user, p, method) {
     }
 
     if (method === "PATCH") {
+      if (!isVaultConfigured(env)) {
+        return json({ error: "vault_unconfigured", note: "VAULT_SECRET belum dikonfigurasi di server." }, 503);
+      }
       const b = await request.json().catch(() => ({}));
       const service = b.service !== undefined ? (String(b.service || "").trim().slice(0, 60) || row.service) : row.service;
       const tag     = b.tag !== undefined ? (String(b.tag || "").trim().slice(0, 40) || null) : row.tag;
@@ -901,6 +924,14 @@ async function handleMatrixApi(request, env, url, user, p, method) {
         encryptVaultField(env, apiKey),
         encryptVaultField(env, recCodes),
       ]);
+      if (
+        (password && !encPassword) ||
+        (totpSecret && !encTotp) ||
+        (apiKey && !encApiKey) ||
+        (recCodes && !encRecCodes)
+      ) {
+        return json({ error: "vault_unconfigured", note: "Enkripsi vault gagal karena VAULT_SECRET belum dikonfigurasi." }, 503);
+      }
 
       await env.DB.prepare(
         `UPDATE matrix_accounts

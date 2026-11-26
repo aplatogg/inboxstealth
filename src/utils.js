@@ -602,9 +602,14 @@ export const clearLogin = (env, key) =>
 /* ---------------- AES-256-GCM Vault Encryption at Rest ---------------- */
 const VAULT_KEY_CACHE = { seed: null, key: null };
 
+export function isVaultConfigured(env) {
+  return Boolean(env && typeof env.VAULT_SECRET === "string" && env.VAULT_SECRET.trim().length > 0);
+}
+
 async function getVaultCryptoKey(env) {
-  const secretPart = (env && (env.VAULT_SECRET || env.TURNSTILE_SECRET || env.TURNSTILE_SITE_KEY || env.OWNER_EMAIL)) || "menyurat-default-vault-key";
-  const seed = "menyurat-vault-aes256gcm-v1|" + String(secretPart);
+  if (!isVaultConfigured(env)) return null;
+  const secretPart = String(env.VAULT_SECRET).trim();
+  const seed = "menyurat-vault-aes256gcm-v1|" + secretPart;
   if (VAULT_KEY_CACHE.seed === seed && VAULT_KEY_CACHE.key) return VAULT_KEY_CACHE.key;
   const rawKey = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed));
   const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
@@ -625,6 +630,7 @@ export async function encryptVaultField(env, plaintext) {
   const s = String(plaintext);
   if (s.startsWith("enc:v1:")) return s;
   const key = await getVaultCryptoKey(env);
+  if (!key) return null;
   const iv = new Uint8Array(12);
   crypto.getRandomValues(iv);
   const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(s));
@@ -636,12 +642,13 @@ export async function decryptVaultField(env, stored) {
   const s = String(stored);
   if (!s.startsWith("enc:v1:")) return s;
   try {
+    const key = await getVaultCryptoKey(env);
+    if (!key) return null;
     const rest = s.slice(7);
     const sep = rest.indexOf(":");
     if (sep < 0) return null;
     const iv = unb64Buf(rest.slice(0, sep));
     const cipher = unb64Buf(rest.slice(sep + 1));
-    const key = await getVaultCryptoKey(env);
     const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
     return new TextDecoder().decode(plainBuf);
   } catch {
