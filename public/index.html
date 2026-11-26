@@ -1135,6 +1135,7 @@
 
         <div class="mx-presets" id="mxPresetBar">
           <span class="mx-presets-lbl">1-Klik Instan:</span>
+          <button type="button" class="mx-preset-btn" data-mx-quick="Auto-Detect" data-mx-days="0" title="Buat email + password sekarang, nama layanan otomatis terdeteksi saat email pertama masuk">🔍 + Auto-Detect (Bebas)</button>
           <button type="button" class="mx-preset-btn" data-mx-quick="Claude (Anthropic)" data-mx-days="0">⚡ + Claude</button>
           <button type="button" class="mx-preset-btn" data-mx-quick="OpenAI" data-mx-days="0">⚡ + OpenAI</button>
           <button type="button" class="mx-preset-btn" data-mx-quick="Cursor" data-mx-days="14">⚡ + Cursor (14d)</button>
@@ -1157,7 +1158,7 @@
             <option value="30">Trial 30 hari</option>
             <option value="90">Trial 90 hari</option>
           </select>
-          <input id="mxService" placeholder="Atau ketik layanan lain (mis. Discord, DigitalOcean)…" maxlength="60" autocomplete="off" aria-label="Layanan">
+          <input id="mxService" placeholder="Ketik judul sendiri / web baru (kosongkan = Auto-Detect)…" maxlength="60" autocomplete="off" aria-label="Layanan">
           <button class="btn btn-primary" id="mxSpawnBtn" type="button" style="height:36px;padding:0 16px">⚡ Spawn Akun</button>
         </div>
 
@@ -3392,12 +3393,7 @@ async function spawnMatrixAccount(presetService, presetDays){
   const msg = $("mxSpawnMsg");
   if (msg) msg.hidden = true;
   const isPreset = typeof presetService === "string" && presetService.length > 0;
-  const service = isPreset ? presetService : (($("mxService") && $("mxService").value || "").trim());
-  if (!service) {
-    if (msg) showMsg(msg, "Pilih tombol 1-Klik Instan di atas atau ketik nama layanan.", "err");
-    if ($("mxService")) $("mxService").focus();
-    return;
-  }
+  const service = isPreset ? presetService : (($("mxService") && $("mxService").value || "").trim() || "Auto-Detect");
   const btn = $("mxSpawnBtn");
   if (btn) btn.disabled = true;
   try {

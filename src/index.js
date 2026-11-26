@@ -2115,21 +2115,66 @@ function detectStatusFromSubjects(subjects) {
   return "active";
 }
 
+function isAutoDetectPlaceholder(svc) {
+  const s = String(svc || "").trim().toLowerCase();
+  return !s || s === "auto-detect" || s === "auto" || s.startsWith("auto-detect ");
+}
+
+function matchServiceFuzzy(targetSvcRaw, detectedSvcRaw, fromAddr, fromName, subject) {
+  const targetSvc = String(targetSvcRaw || "").trim().toLowerCase();
+  if (!targetSvc || isAutoDetectPlaceholder(targetSvc)) return false;
+  const det = String(detectedSvcRaw || "").trim().toLowerCase();
+  if (det && (det === targetSvc || det.includes(targetSvc) || targetSvc.includes(det))) return true;
+  const hay = `${fromAddr || ""} ${fromName || ""} ${subject || ""} ${det}`.toLowerCase();
+  if (targetSvc.length >= 3 && hay.includes(targetSvc)) return true;
+  const stopWords = new Set(["akun", "account", "utama", "baru", "test", "testing", "pro", "vip", "free", "trial", "bot", "web", "app", "ai"]);
+  const tokens = targetSvc.split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !stopWords.has(w));
+  return tokens.some((tk) => hay.includes(tk));
+}
+
 async function autoRegisterMatrixFromEmail(env, userId, inboxAddr, fromAddr, fromName, subject, receivedAt = now()) {
   if (!userId || !inboxAddr) return;
   const service = detectServiceFromEmail(fromAddr, fromName, subject);
   if (!service) return;
-  const existing = await env.DB.prepare(
-    `SELECT id, status FROM matrix_accounts WHERE user_id = ?1 AND address = ?2 AND LOWER(service) = LOWER(?3) LIMIT 1`
-  ).bind(userId, inboxAddr, service).first();
+  const { results: addrRows } = await env.DB.prepare(
+    `SELECT id, service, tag, status FROM matrix_accounts WHERE user_id = ?1 AND address = ?2`
+  ).bind(userId, inboxAddr).all();
+  const rows = addrRows || [];
 
   const detStatus = detectStatusFromSubjects([subject || ""]);
-  if (existing) {
-    if (existing.status === "archived") return;
-    const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && existing.status === "active" ? "cooldown" : existing.status);
+
+  // 1. Exact or fuzzy match on existing account row for this address
+  const matched = rows.find((r) =>
+    String(r.service || "").toLowerCase() === service.toLowerCase() ||
+    matchServiceFuzzy(r.service, service, fromAddr, fromName, subject)
+  );
+  if (matched) {
+    if (matched.status === "archived") return;
+    const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && matched.status === "active" ? "cooldown" : matched.status);
     await env.DB.prepare(
       `UPDATE matrix_accounts SET status = ?2, updated_at = ?3 WHERE id = ?1`
-    ).bind(existing.id, nextStatus, receivedAt).run();
+    ).bind(matched.id, nextStatus, receivedAt).run();
+    return;
+  }
+
+  // 2. Placeholder "Auto-Detect" row waiting for its first email -> auto-rename service to detected name
+  const placeholder = rows.find((r) => r.status !== "archived" && isAutoDetectPlaceholder(r.service));
+  if (placeholder) {
+    const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && placeholder.status === "active" ? "cooldown" : placeholder.status);
+    await env.DB.prepare(
+      `UPDATE matrix_accounts SET service = ?2, status = ?3, updated_at = ?4 WHERE id = ?1`
+    ).bind(placeholder.id, service, nextStatus, receivedAt).run();
+    return;
+  }
+
+  // 3. Single custom-titled manual account on a dedicated inbox -> bind incoming email to it without spawning duplicate #Auto
+  const activeRows = rows.filter((r) => r.status !== "archived");
+  if (activeRows.length === 1 && activeRows[0].tag !== "#Auto") {
+    const only = activeRows[0];
+    const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && only.status === "active" ? "cooldown" : only.status);
+    await env.DB.prepare(
+      `UPDATE matrix_accounts SET status = ?2, updated_at = ?3 WHERE id = ?1`
+    ).bind(only.id, nextStatus, receivedAt).run();
     return;
   }
 
@@ -2153,10 +2198,17 @@ async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
   ).bind(userId).all();
 
   const { results: existingRows } = await env.DB.prepare(
-    `SELECT id, service, address, status FROM matrix_accounts WHERE user_id = ?1`
+    `SELECT id, service, tag, address, status FROM matrix_accounts WHERE user_id = ?1`
   ).bind(userId).all();
 
-  const existingSet = new Set((existingRows || []).map((r) => `${r.address.toLowerCase()}||${(r.service || "").toLowerCase()}`));
+  const existingList = existingRows || [];
+  const existingSet = new Set(existingList.map((r) => `${r.address.toLowerCase()}||${(r.service || "").toLowerCase()}`));
+  const byAddr = new Map();
+  for (const r of existingList) {
+    const a = r.address.toLowerCase();
+    if (!byAddr.has(a)) byAddr.set(a, []);
+    byAddr.get(a).push(r);
+  }
   const groups = new Map();
 
   for (const m of msgs || []) {
@@ -2180,7 +2232,7 @@ async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
 
   // Count how many accounts exist per service to auto-tag #Alt-1, #Alt-2 when multiple accounts share the same service
   const svcCounts = new Map();
-  for (const r of existingRows || []) {
+  for (const r of existingList) {
     const k = (r.service || "").toLowerCase();
     svcCounts.set(k, (svcCounts.get(k) || 0) + 1);
   }
@@ -2193,6 +2245,21 @@ async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
   let added = 0;
   for (const [key, g] of groups.entries()) {
     if (existingSet.has(key)) continue;
+    const addrRows = byAddr.get(g.address) || [];
+    // Check if an Auto-Detect placeholder or fuzzy-matched custom title already exists on this address
+    const placeholder = addrRows.find((r) => r.status !== "archived" && isAutoDetectPlaceholder(r.service));
+    if (placeholder) {
+      placeholder.service = g.service;
+      existingSet.add(key);
+      await env.DB.prepare(`UPDATE matrix_accounts SET service = ?2, updated_at = ?3 WHERE id = ?1`)
+        .bind(placeholder.id, g.service, g.last_at).run();
+      continue;
+    }
+    const fuzzyMatch = addrRows.find((r) => matchServiceFuzzy(r.service, g.service, "", "", g.subjects.join(" ")));
+    if (fuzzyMatch) continue;
+    const activeManual = addrRows.filter((r) => r.status !== "archived" && r.tag !== "#Auto");
+    if (activeManual.length === 1 && addrRows.length === 1) continue;
+
     existingSet.add(key);
     const svcKey = g.service.toLowerCase();
     const nextIdx = (svcCounts.get(svcKey) || 0) + 1;
@@ -2237,7 +2304,7 @@ async function fetchInboxMessagesForMatrix(env, address) {
   return results || [];
 }
 
-async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null) {
+async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null, peerServicesOnAddr = null) {
   let totpCode = null;
   let totpRem  = null;
   if (row.totp_secret) {
@@ -2247,17 +2314,45 @@ async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null
     } catch {}
   }
   const allMsgs = preloadedMsgs || await fetchInboxMessagesForMatrix(env, row.address);
-  const targetSvc = String(row.service || "").trim().toLowerCase();
+
+  // If this row was created in "Auto-Detect" mode and an email has arrived, auto-promote the service name
+  let currentService = String(row.service || "").trim() || "Auto-Detect";
+  if (isAutoDetectPlaceholder(currentService) && allMsgs.length > 0) {
+    const firstDetected = detectServiceFromEmail(allMsgs[0].from_addr, allMsgs[0].from_name, allMsgs[0].subject);
+    if (firstDetected) {
+      currentService = firstDetected;
+      row.service = firstDetected;
+      try {
+        await env.DB.prepare(`UPDATE matrix_accounts SET service = ?2, updated_at = ?3 WHERE id = ?1`)
+          .bind(row.id, firstDetected, allMsgs[0].received_at || nowMs).run();
+      } catch {}
+    }
+  }
+
   const svcMsgs = allMsgs.filter((m) => {
     const det = detectServiceFromEmail(m.from_addr, m.from_name, m.subject);
-    if (det && det.toLowerCase() === targetSvc) return true;
-    const hay = `${m.from_addr || ""} ${m.from_name || ""} ${m.subject || ""}`.toLowerCase();
-    return targetSvc.length >= 3 && hay.includes(targetSvc);
+    return matchServiceFuzzy(currentService, det, m.from_addr, m.from_name, m.subject);
   });
 
-  // Prevent cross-service OTP leakage on shared inboxes: only fallback to unclaimed messages
-  const unclaimedMsgs = allMsgs.filter((m) => !detectServiceFromEmail(m.from_addr, m.from_name, m.subject));
-  const pool = svcMsgs.length ? svcMsgs : unclaimedMsgs;
+  // Determine message pool:
+  // - If fuzzy/exact matched messages exist, use them.
+  // - If this inbox is dedicated to a single account (e.g. user entered a custom title like "Akun Kampus" or "Auto-Detect"),
+  //   bind all messages in that inbox directly to this account so OTP & Magic Link always work!
+  // - If shared inbox across multiple accounts, only include messages not claimed by another sibling account on the same address.
+  const otherPeers = (peerServicesOnAddr || []).filter((s) => s.toLowerCase() !== currentService.toLowerCase());
+  const isDedicatedInbox = otherPeers.length === 0;
+  let fallbackMsgs = [];
+  if (!svcMsgs.length) {
+    if (isDedicatedInbox || isAutoDetectPlaceholder(currentService)) {
+      fallbackMsgs = allMsgs;
+    } else {
+      fallbackMsgs = allMsgs.filter((m) => {
+        const det = detectServiceFromEmail(m.from_addr, m.from_name, m.subject);
+        return !otherPeers.some((peerSvc) => matchServiceFuzzy(peerSvc, det, m.from_addr, m.from_name, m.subject));
+      });
+    }
+  }
+  const pool = svcMsgs.length ? svcMsgs : fallbackMsgs;
   const latest = pool[0] || null;
 
   let emailOtp  = null;
@@ -2271,7 +2366,7 @@ async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null
 
   return {
     id: row.id,
-    service: row.service,
+    service: currentService,
     tag: row.tag || null,
     address: row.address,
     username: row.username || null,
@@ -2286,7 +2381,7 @@ async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null
     expires_at: row.expires_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
-    message_count: svcMsgs.length ? svcMsgs.length : unclaimedMsgs.length,
+    message_count: pool.length,
     email_otp: emailOtp,
     magic_link: magicLink,
     latest_message_id: latest ? latest.id : null,
@@ -2300,13 +2395,19 @@ async function enrichMatrixAccountList(env, rows, nowMs = now()) {
   const arr = rows || [];
   if (!arr.length) return [];
   const uniqueAddrs = [...new Set(arr.map((r) => r.address))];
+  const peerMap = new Map();
+  for (const r of arr) {
+    const a = r.address;
+    if (!peerMap.has(a)) peerMap.set(a, []);
+    peerMap.get(a).push(String(r.service || ""));
+  }
   const msgMap = new Map();
   await Promise.all(
     uniqueAddrs.map(async (addr) => {
       msgMap.set(addr, await fetchInboxMessagesForMatrix(env, addr));
     })
   );
-  return Promise.all(arr.map((r) => enrichMatrixAccount(env, r, nowMs, msgMap.get(r.address))));
+  return Promise.all(arr.map((r) => enrichMatrixAccount(env, r, nowMs, msgMap.get(r.address), peerMap.get(r.address))));
 }
 
 async function handleMatrixApi(request, env, url, user, p, method) {
@@ -2347,8 +2448,7 @@ async function handleMatrixApi(request, env, url, user, p, method) {
   // POST /api/matrix — 1-Click Spawn Identity or Add Account
   if (p === "/api/matrix" && method === "POST") {
     const b = await request.json().catch(() => ({}));
-    const service = String(b.service || "").trim().slice(0, 60);
-    if (!service) return json({ error: "service_required", note: "Nama layanan/platform wajib diisi." }, 400);
+    const service = String(b.service || "").trim().slice(0, 60) || "Auto-Detect";
     const tag = String(b.tag || "").trim().slice(0, 40) || null;
 
     let fullAddress = "";
@@ -2462,10 +2562,15 @@ async function handleMatrixApi(request, env, url, user, p, method) {
     if (!row || (row.user_id !== user.id && user.role !== "owner")) {
       return json({ error: "not_found" }, 404);
     }
-    const enriched = await enrichMatrixAccount(env, row, t);
+    const { results: peerRows } = await env.DB.prepare(
+      `SELECT service FROM matrix_accounts WHERE user_id = ?1 AND address = ?2 AND status != 'archived'`
+    ).bind(row.user_id, row.address).all();
+    const peerServices = (peerRows || []).map((r) => String(r.service || ""));
+    const enriched = await enrichMatrixAccount(env, row, t, null, peerServices);
     return json({
       ok: true,
       id: enriched.id,
+      service: enriched.service,
       address: enriched.address,
       totp_code: enriched.totp_code,
       totp_rem: enriched.totp_rem,
