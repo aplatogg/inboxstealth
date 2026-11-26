@@ -2,8 +2,8 @@
 import { hashPassword, listUsers, getUserById, countUsers, randomToken, sha256Hex } from "../auth.js";
 import { ingest } from "../email-handler.js";
 import {
-  now, isStaff, canManage, json, maxMailBytes, normalizeDomain, normalizeEmail,
-  EMAIL_RE, audit, listDomains, getDomain, inboxRow, ensureInbox, fileDel
+  now, isStaff, rank, canManage, json, maxMailBytes, normalizeDomain, normalizeEmail,
+  EMAIL_RE, audit, listDomains, getDomain, inboxRow, ensureInbox, canSee, fileDel
 } from "../utils.js";
 
 export async function handleAdmin(request, env, url, user) {
@@ -13,12 +13,17 @@ export async function handleAdmin(request, env, url, user) {
   const hasSession = user.authType === "session";
 
   if (p === "/api/admin/users" && method === "GET") {
+    const allUsers = await listUsers(env, url.searchParams.get("status") || null);
+    // Prinsip Owner = Dewa: Admin tidak boleh melihat akun maupun email Owner di daftar pengguna
+    const visibleUsers = user.role === "owner"
+      ? allUsers
+      : allUsers.filter((u) => u.role !== "owner");
     return json({
-      users: await listUsers(env, url.searchParams.get("status") || null),
+      users: visibleUsers,
       counts: {
         pending: await countUsers(env, "pending"),
         approved: await countUsers(env, "approved"),
-        total: await countUsers(env),
+        total: visibleUsers.length,
       },
     });
   }
@@ -180,7 +185,25 @@ export async function handleAdmin(request, env, url, user) {
     if (!b.raw) return json({ error: "raw_required" }, 400);
     const domain = to.split("@")[1];
     if (!(await getDomain(env, domain))) return json({ error: "domain_unknown" }, 400);
-    if (!(await inboxRow(env, to))) await ensureInbox(env, to, domain, user.id);
+    const existingBox = await inboxRow(env, to);
+    if (existingBox) {
+      // Admin tidak boleh menyuntikkan email ke inbox milik Owner atau sesama Admin
+      if (!(await canSee(env, user, existingBox))) {
+        return json({ error: "forbidden", reason: "target_rank_higher_or_equal" }, 403);
+      }
+    } else {
+      // Cek juga apakah alamat ini terdaftar di AccountMatrix milik user dengan rank >= admin
+      if (user.role !== "owner") {
+        const mxOwner = await env.DB.prepare(
+          `SELECT u.role FROM matrix_accounts mx JOIN users u ON u.id = mx.user_id
+            WHERE mx.address = ?1 AND mx.user_id != ?2 LIMIT 1`
+        ).bind(to, user.id).first();
+        if (mxOwner && rank(mxOwner.role) >= rank(user.role)) {
+          return json({ error: "forbidden", reason: "target_rank_higher_or_equal" }, 403);
+        }
+      }
+      await ensureInbox(env, to, domain, user.id);
+    }
     const enc = new TextEncoder().encode(String(b.raw));
     if (enc.length > maxMailBytes(env))
       return json({ error: "message_too_large", max_bytes: maxMailBytes(env) }, 413);
@@ -253,19 +276,56 @@ export async function handleAdmin(request, env, url, user) {
 
   if (p === "/api/admin/audit" && method === "GET") {
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "100", 10) || 100, 500);
+    if (user.role === "owner") {
+      const { results } = await env.DB.prepare(
+        `SELECT id, actor_email, action, target, meta, ip, created_at FROM audit_log ORDER BY created_at DESC LIMIT ?1`
+      ).bind(limit).all();
+      return json({ entries: results || [] });
+    }
+    // Admin hanya boleh melihat log miliknya sendiri, member, dan vip (aktivitas/email/IP/inbox Owner 100% tersembunyi)
+    const ownerEmail = normalizeEmail(env.OWNER_EMAIL || "");
     const { results } = await env.DB.prepare(
-      `SELECT id, actor_email, action, target, meta, ip, created_at FROM audit_log ORDER BY created_at DESC LIMIT ?1`
-    ).bind(limit).all();
+      `SELECT a.id, a.actor_email, a.action, a.target, a.meta, a.ip, a.created_at
+         FROM audit_log a
+         LEFT JOIN users u ON u.id = a.actor_id
+        WHERE (a.actor_id IS NULL OR a.actor_id = ?1 OR u.role IN ('vip', 'member'))
+          AND LOWER(COALESCE(a.actor_email, '')) != ?2
+          AND NOT EXISTS (
+            SELECT 1 FROM users ou WHERE ou.role = 'owner'
+              AND (LOWER(ou.email) = LOWER(COALESCE(a.actor_email, '')) OR LOWER(ou.email) = LOWER(COALESCE(a.target, '')))
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM inboxes i JOIN users iu ON iu.id = i.user_id
+             WHERE iu.role = 'owner' AND (i.address = a.target OR a.target LIKE i.address || '/%')
+          )
+        ORDER BY a.created_at DESC LIMIT ?3`
+    ).bind(user.id, ownerEmail, limit).all();
     return json({ entries: results || [] });
   }
 
   if (p === "/api/admin/log" && method === "GET") {
     const q = (url.searchParams.get("address") || "").trim().toLowerCase();
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "200", 10) || 200, 500);
-    const sel = `SELECT id, inbox, domain, peer, peer_name, subject, message_id, first_at FROM inbox_log`;
+    if (user.role === "owner") {
+      const sel = `SELECT id, inbox, domain, peer, peer_name, subject, message_id, first_at FROM inbox_log`;
+      const rows = q
+        ? await env.DB.prepare(sel + ` WHERE inbox = ?1 ORDER BY first_at DESC LIMIT ?2`).bind(q, limit).all()
+        : await env.DB.prepare(sel + ` ORDER BY first_at DESC LIMIT ?1`).bind(limit).all();
+      return json({ log: rows.results || [] });
+    }
+    // Admin hanya boleh membaca inbox_log untuk inbox tak bertuan, miliknya sendiri, atau milik member/vip (Owner & Admin lain tersembunyi)
+    const baseSql = `SELECT l.id, l.inbox, l.domain, l.peer, l.peer_name, l.subject, l.message_id, l.first_at
+                       FROM inbox_log l
+                       LEFT JOIN inboxes i ON i.address = l.inbox
+                       LEFT JOIN users u ON u.id = i.user_id
+                      WHERE (i.user_id IS NULL OR i.user_id = ?1 OR u.role IN ('vip', 'member'))
+                        AND NOT EXISTS (
+                          SELECT 1 FROM matrix_accounts mx JOIN users mu ON mu.id = mx.user_id
+                           WHERE mx.address = l.inbox AND mu.id != ?1 AND mu.role IN ('owner', 'admin')
+                        )`;
     const rows = q
-      ? await env.DB.prepare(sel + ` WHERE inbox = ?1 ORDER BY first_at DESC LIMIT ?2`).bind(q, limit).all()
-      : await env.DB.prepare(sel + ` ORDER BY first_at DESC LIMIT ?1`).bind(limit).all();
+      ? await env.DB.prepare(baseSql + ` AND l.inbox = ?2 ORDER BY l.first_at DESC LIMIT ?3`).bind(user.id, q, limit).all()
+      : await env.DB.prepare(baseSql + ` ORDER BY l.first_at DESC LIMIT ?2`).bind(user.id, limit).all();
     return json({ log: rows.results || [] });
   }
 

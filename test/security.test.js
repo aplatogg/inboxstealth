@@ -5,14 +5,18 @@ import path from "node:path";
 import worker, {
   isValidCsrfRequest,
   isSafeWebhookUrl,
+  resolveAndValidateWebhookHost,
   safeAttachmentMime,
   hitLogin,
   failLogin,
   clearLogin,
+  canSee,
+  encryptVaultField,
+  decryptVaultField,
   extractOtpServer,
 } from "../src/index.js";
 import { parseEmail } from "../src/mime.js";
-import { hashPassword } from "../src/auth.js";
+import { hashPassword, sha256Hex } from "../src/auth.js";
 
 // Lightweight in-memory D1 mock for auth/lockout integration tests
 function createMockEnv() {
@@ -235,9 +239,89 @@ describe("3. Webhook SSRF Filter (isSafeWebhookUrl)", () => {
     expect(isSafeWebhookUrl("https://discord.com/api/webhooks/123456/abcdef", "menyurat.me")).toBe(true);
     expect(isSafeWebhookUrl("https://8.8.8.8/webhook", "menyurat.me")).toBe(true);
   });
+
+  it("blocks DNS rebinding domains that resolve to private/loopback IPs via DoH", async () => {
+    const mockRebindFetch = async () => new Response(JSON.stringify({
+      Status: 0,
+      Answer: [{ type: 1, data: "127.0.0.1" }],
+    }), { status: 200 });
+    const mockMetaFetch = async () => new Response(JSON.stringify({
+      Status: 0,
+      Answer: [{ type: 1, data: "169.254.169.254" }],
+    }), { status: 200 });
+    const mockPublicFetch = async () => new Response(JSON.stringify({
+      Status: 0,
+      Answer: [{ type: 1, data: "93.184.216.34" }],
+    }), { status: 200 });
+
+    expect(await resolveAndValidateWebhookHost("https://rebind.attacker.com/hook", "menyurat.me", mockRebindFetch)).toBe(false);
+    expect(await resolveAndValidateWebhookHost("https://meta.attacker.com/hook", "menyurat.me", mockMetaFetch)).toBe(false);
+    expect(await resolveAndValidateWebhookHost("https://webhook.example.com/hook", "menyurat.me", mockPublicFetch)).toBe(true);
+  });
 });
 
-describe("4. MIME & Attachment Sanitization", () => {
+describe("4. Owner vs Admin Hierarchy & AES-256-GCM Vault Encryption", () => {
+  it("prevents Admin from seeing or modifying Owner or fellow Admin inboxes (canSee)", async () => {
+    const env = {
+      DB: {
+        prepare() {
+          return {
+            _id: null,
+            bind(id) { this._id = id; return this; },
+            async first() {
+              if (this._id === "owner-1") return { role: "owner" };
+              if (this._id === "admin-2") return { role: "admin" };
+              if (this._id === "vip-1") return { role: "vip" };
+              return { role: "member" };
+            },
+          };
+        },
+      },
+    };
+    const adminUser = { id: "admin-1", role: "admin" };
+    const ownerUser = { id: "owner-1", role: "owner" };
+
+    // Admin CANNOT see or touch Owner's inbox or another Admin's inbox
+    expect(await canSee(env, adminUser, { address: "god@menyurat.me", user_id: "owner-1" })).toBe(false);
+    expect(await canSee(env, adminUser, { address: "peer@menyurat.me", user_id: "admin-2" })).toBe(false);
+    // Admin CAN see VIP/Member or their own inbox
+    expect(await canSee(env, adminUser, { address: "vip@menyurat.me", user_id: "vip-1" })).toBe(true);
+    expect(await canSee(env, adminUser, { address: "own@menyurat.me", user_id: "admin-1" })).toBe(true);
+    // Owner CAN see everything
+    expect(await canSee(env, ownerUser, { address: "peer@menyurat.me", user_id: "admin-2" })).toBe(true);
+  });
+
+  it("encrypts and decrypts AccountMatrix vault fields with AES-256-GCM (enc:v1:...)", async () => {
+    const env = { VAULT_SECRET: "unit-test-vault-secret-key-2026" };
+    const rawPass = "K9#mP2$vL8@xQ4!zR7";
+    const cipher = await encryptVaultField(env, rawPass);
+    expect(cipher).toMatch(/^enc:v1:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/);
+    expect(cipher).not.toContain(rawPass);
+
+    const decrypted = await decryptVaultField(env, cipher);
+    expect(decrypted).toBe(rawPass);
+
+    // Backward compatibility with legacy plaintext
+    expect(await decryptVaultField(env, "legacy-plain")).toBe("legacy-plain");
+  });
+
+  it("prevents email enumeration on /api/auth/register by returning 201 generic pending message", async () => {
+    const env = createMockEnv();
+    env._users.set("existing@menyurat.me", { id: "u-1", email: "existing@menyurat.me" });
+
+    const req = new Request("https://menyurat.me/api/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json", "origin": "https://menyurat.me" },
+      body: JSON.stringify({ email: "existing@menyurat.me", password: "ValidPassword123!" }),
+    });
+    const res = await worker.fetch(req, env);
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.status).toBe("pending");
+  });
+});
+
+describe("5. MIME & Attachment Sanitization", () => {
   it("strips <style>, <script>, and comments from HTML-only emails and extracts real OTP instead of CSS hex codes", () => {
     const rawEmail = [
       "From: IONOS Customer Service <customer@ionos.com>",

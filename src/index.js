@@ -5,17 +5,18 @@ import { handleAdmin } from "./routes/admin.js";
 import {
   handleInboxRoutes, extractOtpServer, extractMagicLinkServer, detectServiceFromEmail
 } from "./routes/inbox.js";
-import { isSafeWebhookUrl } from "./routes/webhooks.js";
+import { isSafeWebhookUrl, resolveAndValidateWebhookHost } from "./routes/webhooks.js";
 import { handleEmail, ingest } from "./email-handler.js";
 import { handleScheduled } from "./cron.js";
 import {
   now, json, corsFor, isValidCsrfRequest, currentUser,
-  cspForHtml, harden, hitLogin, failLogin, clearLogin, safeAttachmentMime
+  cspForHtml, harden, hitLogin, failLogin, clearLogin, safeAttachmentMime,
+  canSee, encryptVaultField, decryptVaultField
 } from "./utils.js";
 
 export {
-  isValidCsrfRequest, isSafeWebhookUrl, safeAttachmentMime,
-  hitLogin, failLogin, clearLogin,
+  isValidCsrfRequest, isSafeWebhookUrl, resolveAndValidateWebhookHost, safeAttachmentMime,
+  hitLogin, failLogin, clearLogin, canSee, encryptVaultField, decryptVaultField,
   extractOtpServer, extractMagicLinkServer, detectServiceFromEmail, ingest
 };
 

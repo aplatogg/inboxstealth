@@ -8,7 +8,8 @@ import {
   zipStore, csvCell, paramsFor, isReservedLocal, hitRate, audit,
   listDomains, getDomain, resolveDomain, inboxRow, purgeInboxContents,
   ensureInbox, inboxRowOrRestoreFromMatrix, canSee, listMessages, getMessage,
-  quotaCheck, store, fileGet, fileDel, safeAttachmentMime
+  quotaCheck, store, fileGet, fileDel, safeAttachmentMime,
+  encryptVaultField, decryptVaultField
 } from "../utils.js";
 
 /* ---------------- SSE ---------------- */
@@ -339,13 +340,13 @@ export async function ensureMatrixForInbox(env, userId, address, note = null, no
     const cleanSvc = (note && String(note).trim()) ? String(note).trim().slice(0, 60) : "Auto-Detect";
     const localPart = address.split("@")[0] || "user";
     const username = localPart.replace(/[._-]/g, "");
-    const password = generateStrongPassword(18);
+    const encPw = await encryptVaultField(env, generateStrongPassword(18));
     await env.DB.prepare(
       `INSERT INTO matrix_accounts
          (id, user_id, service, tag, address, username, password, totp_secret,
           api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
        VALUES (?1,?2,?3,'#Inbox',?4,?5,?6,NULL,NULL,NULL,'Dibuat dari Inbox menyurat.me','active',NULL,?7,?7)`
-    ).bind(crypto.randomUUID(), userId, cleanSvc, address, username, password, nowMs).run();
+    ).bind(crypto.randomUUID(), userId, cleanSvc, address, username, encPw, nowMs).run();
   } catch {}
 }
 
@@ -520,12 +521,13 @@ export async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
     const localPart = addr.split("@")[0] || "user";
     const username = localPart.replace(/[._-]/g, "");
     const t = b.created_at || nowMs;
+    const encPw = await encryptVaultField(env, generateStrongPassword(18));
     await env.DB.prepare(
       `INSERT INTO matrix_accounts
          (id, user_id, service, tag, address, username, password, totp_secret,
           api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
        VALUES (?1,?2,?3,'#Inbox',?4,?5,?6,NULL,NULL,NULL,'Auto-synced dari daftar alamat menyurat.me','active',NULL,?7,?7)`
-    ).bind(crypto.randomUUID(), userId, svc, addr, username, generateStrongPassword(18), t).run();
+    ).bind(crypto.randomUUID(), userId, svc, addr, username, encPw, t).run();
     byAddr.set(addr, [{ address: addr, service: svc, tag: "#Inbox", status: "active" }]);
     added++;
   }
@@ -545,11 +547,39 @@ async function fetchInboxMessagesForMatrix(env, address) {
 }
 
 async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null, peerServicesOnAddr = null) {
+  // Decrypt sensitive vault fields (and auto-migrate legacy plaintext rows in D1 to AES-256-GCM)
+  const needsEncryptMigration =
+    (row.password && !String(row.password).startsWith("enc:v1:")) ||
+    (row.totp_secret && !String(row.totp_secret).startsWith("enc:v1:")) ||
+    (row.api_key && !String(row.api_key).startsWith("enc:v1:")) ||
+    (row.recovery_codes && !String(row.recovery_codes).startsWith("enc:v1:"));
+
+  const [plainPassword, plainTotpSecret, plainApiKey, plainRecovery] = await Promise.all([
+    decryptVaultField(env, row.password),
+    decryptVaultField(env, row.totp_secret),
+    decryptVaultField(env, row.api_key),
+    decryptVaultField(env, row.recovery_codes),
+  ]);
+
+  if (needsEncryptMigration) {
+    try {
+      const [ePw, eTotp, eKey, eRec] = await Promise.all([
+        encryptVaultField(env, plainPassword),
+        encryptVaultField(env, plainTotpSecret),
+        encryptVaultField(env, plainApiKey),
+        encryptVaultField(env, plainRecovery),
+      ]);
+      await env.DB.prepare(
+        `UPDATE matrix_accounts SET password = ?2, totp_secret = ?3, api_key = ?4, recovery_codes = ?5 WHERE id = ?1`
+      ).bind(row.id, ePw, eTotp, eKey, eRec).run();
+    } catch {}
+  }
+
   let totpCode = null;
   let totpRem  = null;
-  if (row.totp_secret) {
+  if (plainTotpSecret) {
     try {
-      totpCode = await totpAt(row.totp_secret, nowMs);
+      totpCode = await totpAt(plainTotpSecret, nowMs);
       totpRem  = 30 - (Math.floor(nowMs / 1000) % 30);
     } catch {}
   }
@@ -608,12 +638,12 @@ async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null
     tag: row.tag || null,
     address: row.address,
     username: row.username || null,
-    password: row.password || null,
-    totp_secret: row.totp_secret || null,
+    password: plainPassword || null,
+    totp_secret: plainTotpSecret || null,
     totp_code: totpCode,
     totp_rem: totpRem,
-    api_key: row.api_key || null,
-    recovery_codes: row.recovery_codes || null,
+    api_key: plainApiKey || null,
+    recovery_codes: plainRecovery || null,
     opsec_note: row.opsec_note || null,
     status: row.status || "active",
     expires_at: row.expires_at || null,
@@ -771,6 +801,13 @@ async function handleMatrixApi(request, env, url, user, p, method) {
       expiresAt = t + Math.min(3650, Number(b.trial_days)) * 86400_000;
     }
 
+    const [encPassword, encTotp, encApiKey, encRecCodes] = await Promise.all([
+      encryptVaultField(env, password),
+      encryptVaultField(env, totpSecret),
+      encryptVaultField(env, apiKey),
+      encryptVaultField(env, recCodes),
+    ]);
+
     const id = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO matrix_accounts
@@ -778,8 +815,8 @@ async function handleMatrixApi(request, env, url, user, p, method) {
           api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)`
     ).bind(
-      id, user.id, service, tag, fullAddress, username, password, totpSecret,
-      apiKey, recCodes, opsecNote, status, expiresAt, t
+      id, user.id, service, tag, fullAddress, username, encPassword, encTotp,
+      encApiKey, encRecCodes, opsecNote, status, expiresAt, t
     ).run();
 
     await audit(env, user, "matrix.spawn", fullAddress, { id, service, tag }, request);
@@ -858,6 +895,13 @@ async function handleMatrixApi(request, env, url, user, p, method) {
         expiresAt = (Number.isFinite(td) && td > 0) ? (t + Math.min(3650, td) * 86400_000) : null;
       }
 
+      const [encPassword, encTotp, encApiKey, encRecCodes] = await Promise.all([
+        encryptVaultField(env, password),
+        encryptVaultField(env, totpSecret),
+        encryptVaultField(env, apiKey),
+        encryptVaultField(env, recCodes),
+      ]);
+
       await env.DB.prepare(
         `UPDATE matrix_accounts
             SET service = ?2, tag = ?3, username = ?4, password = ?5, totp_secret = ?6,
@@ -865,8 +909,8 @@ async function handleMatrixApi(request, env, url, user, p, method) {
                 expires_at = ?11, updated_at = ?12
           WHERE id = ?1`
       ).bind(
-        id, service, tag, username, password, totpSecret,
-        apiKey, recCodes, opsecNote, status, expiresAt, t
+        id, service, tag, username, encPassword, encTotp,
+        encApiKey, encRecCodes, opsecNote, status, expiresAt, t
       ).run();
 
       if (b.service !== undefined || b.tag !== undefined) {
@@ -1017,8 +1061,8 @@ export async function handleInboxRoutes(request, env, url, user) {
     const address = decodeURIComponent(mClearMsgs[1]).toLowerCase();
     const box = await inboxRow(env, address);
     if (!box) return json({ error: "inbox_not_found" }, 404);
-    const own = box.user_id && box.user_id === user.id;
-    if (!own && !isStaff(user)) return json({ error: "forbidden" }, 403);
+    // Prinsip Owner = Dewa: Admin hanya boleh mengosongkan inbox miliknya sendiri atau member/vip
+    if (!(await canSee(env, user, box))) return json({ error: "forbidden" }, 403);
     const { results: msgs } = await env.DB.prepare(`SELECT raw_key FROM messages WHERE inbox = ?1`).bind(address).all();
     const { results: atts } = await env.DB.prepare(`SELECT r2_key FROM attachments WHERE inbox = ?1`).bind(address).all();
     for (const m of msgs || []) if (m.raw_key) await fileDel(env, m.raw_key);
@@ -1131,8 +1175,8 @@ export async function handleInboxRoutes(request, env, url, user) {
     const address = decodeURIComponent(mInbox[1]).toLowerCase();
     const box = await inboxRowOrRestoreFromMatrix(env, address);
     if (!box) return json({ error: "inbox_not_found" }, 404);
-    const own = box.user_id && box.user_id === user.id;
-    if (!own && !isStaff(user)) return json({ error: "forbidden" }, 403);
+    // Prinsip Owner = Dewa: Admin tidak boleh mengubah label, pin, atau TTL inbox milik Owner/Admin lain
+    if (!(await canSee(env, user, box))) return json({ error: "forbidden" }, 403);
     const body = await request.json().catch(() => ({}));
 
     if (body && body.note !== undefined) {

@@ -34,6 +34,37 @@ export function isSafeWebhookUrl(u, selfHost = "") {
   return true;
 }
 
+// Verifikasi DNS via Cloudflare DoH untuk mencegah DNS Rebinding ke IP privat/loopback/metadata
+export async function resolveAndValidateWebhookHost(u, selfHost = "", fetchFn = fetch) {
+  if (!isSafeWebhookUrl(u, selfHost)) return false;
+  const h = new URL(u).hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (/^[0-9.]+$/.test(h)) return true; // sudah divalidasi sebagai IPv4 publik oleh isSafeWebhookUrl
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
+  try {
+    const dohUrl = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(h)}&type=A`;
+    const res = await fetchFn(dohUrl, {
+      headers: { accept: "application/dns-json" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => null);
+    if (!data || data.Status !== 0 || !Array.isArray(data.Answer)) return false;
+    const ipRecords = data.Answer.filter((a) => a && a.type === 1 && typeof a.data === "string");
+    if (!ipRecords.length) return false;
+    for (const rec of ipRecords) {
+      if (!isSafeWebhookUrl(`https://${rec.data.trim()}/`, selfHost)) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function hmacHex(secret, data) {
   const key = await crypto.subtle.importKey(
     "raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -48,7 +79,11 @@ export async function fireWebhook(env, address, msg) {
     ).bind(address).all();
     if (!results || !results.length) return;
     for (const h of results) {
-      if (!isSafeWebhookUrl(h.url)) continue;
+      if (!(await resolveAndValidateWebhookHost(h.url))) {
+        await env.DB.prepare(`UPDATE webhooks SET last_status = -2, last_at = ?2 WHERE id = ?1`)
+          .bind(h.id, now()).run();
+        continue;
+      }
       const payload = JSON.stringify({
         event: "message.new", inbox: address,
         id: msg.id, from: msg.from, subject: msg.subject,
@@ -94,6 +129,8 @@ export async function handleWebhookRoutes(request, env, url, user, address) {
     const selfHost = url.hostname.toLowerCase().replace(/^www\./, "");
     if (!isSafeWebhookUrl(whUrl, selfHost))
       return json({ error: "invalid_url", note: "URL harus http(s) publik, bukan alamat internal" }, 400);
+    if (!(await resolveAndValidateWebhookHost(whUrl, selfHost)))
+      return json({ error: "invalid_url", note: "Domain webhook tidak memiliki IP publik yang valid (atau mengarah ke IP privat)" }, 400);
     const whHost = new URL(whUrl).hostname.toLowerCase().replace(/\.$/, "");
     const ownDom = await env.DB.prepare(`SELECT domain FROM domains WHERE domain = ?1 OR ?1 LIKE '%.' || domain LIMIT 1`).bind(whHost).first();
     if (ownDom) return json({ error: "invalid_url", note: "Webhook tidak boleh mengarah ke domain menyurat sendiri" }, 400);

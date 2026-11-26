@@ -598,3 +598,53 @@ export async function failLogin(env, key, row) {
 
 export const clearLogin = (env, key) =>
   env.DB.prepare(`DELETE FROM login_attempts WHERE rl_key = ?1`).bind(key).run();
+
+/* ---------------- AES-256-GCM Vault Encryption at Rest ---------------- */
+const VAULT_KEY_CACHE = { seed: null, key: null };
+
+async function getVaultCryptoKey(env) {
+  const secretPart = (env && (env.VAULT_SECRET || env.TURNSTILE_SECRET || env.TURNSTILE_SITE_KEY || env.OWNER_EMAIL)) || "menyurat-default-vault-key";
+  const seed = "menyurat-vault-aes256gcm-v1|" + String(secretPart);
+  if (VAULT_KEY_CACHE.seed === seed && VAULT_KEY_CACHE.key) return VAULT_KEY_CACHE.key;
+  const rawKey = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed));
+  const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+  VAULT_KEY_CACHE.seed = seed;
+  VAULT_KEY_CACHE.key = key;
+  return key;
+}
+
+function unb64Buf(str) {
+  const bin = atob(str);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+export async function encryptVaultField(env, plaintext) {
+  if (plaintext === null || plaintext === undefined || plaintext === "") return null;
+  const s = String(plaintext);
+  if (s.startsWith("enc:v1:")) return s;
+  const key = await getVaultCryptoKey(env);
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(s));
+  return `enc:v1:${b64(iv)}:${b64(cipher)}`;
+}
+
+export async function decryptVaultField(env, stored) {
+  if (stored === null || stored === undefined || stored === "") return null;
+  const s = String(stored);
+  if (!s.startsWith("enc:v1:")) return s;
+  try {
+    const rest = s.slice(7);
+    const sep = rest.indexOf(":");
+    if (sep < 0) return null;
+    const iv = unb64Buf(rest.slice(0, sep));
+    const cipher = unb64Buf(rest.slice(sep + 1));
+    const key = await getVaultCryptoKey(env);
+    const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
+    return new TextDecoder().decode(plainBuf);
+  } catch {
+    return null;
+  }
+}

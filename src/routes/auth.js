@@ -34,15 +34,18 @@ export async function handleAuth(request, env, url) {
     if (!EMAIL_RE.test(email)) return json({ error: "invalid_email" }, 400);
     if (password.length < 8) return json({ error: "password_too_short", min: 8 }, 400);
 
-    if (await env.DB.prepare(`SELECT id FROM users WHERE email = ?1`).bind(email).first())
-      return json({ error: "email_taken" }, 409);
+    const passHash = await hashPassword(password);
+    if (await env.DB.prepare(`SELECT id FROM users WHERE email = ?1`).bind(email).first()) {
+      // Cegah enumerasi email terdaftar: tetap jalankan PBKDF2 di atas dan balas pesan generik yang sama
+      return json({ ok: true, status: "pending", message: "Pendaftaran diterima. Tunggu persetujuan owner." }, 201);
+    }
 
     const isOwner = normalizeEmail(env.OWNER_EMAIL || "") === email;
     const id = crypto.randomUUID(), t = now();
     await env.DB.prepare(
       `INSERT INTO users (id,email,name,pass_hash,role,status,created_at,approved_at,approved_by)
        VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)`
-    ).bind(id, email, name, await hashPassword(password), isOwner ? "owner" : "member",
+    ).bind(id, email, name, passHash, isOwner ? "owner" : "member",
       isOwner ? "approved" : "pending", t, isOwner ? t : null, isOwner ? "bootstrap" : null).run();
 
     await audit(env, { id, email }, "user.register", email, { owner: isOwner }, request);
@@ -206,7 +209,16 @@ export async function handleAuth(request, env, url) {
         passed = true;
       }
     }
-    if (!passed) return json({ error: "invalid_code" }, 401);
+    if (!passed) {
+      // Ikat brute-force counter langsung ke ticket: hanguskan ticket pada kegagalan ke-5
+      const ticketTry = await hitRate(env, `2fa-ticket-fail|${tHash}`, 4, 10 * 60_000);
+      if (!ticketTry.ok) {
+        await env.DB.prepare(`UPDATE login_tickets SET used_at = ?2 WHERE token_hash = ?1`).bind(tHash, now()).run();
+        await audit(env, u, "login.2fa_burned", u.email, null, request);
+        return json({ error: "ticket_expired", note: "Terlalu banyak percobaan salah, tiket hangus. Login ulang." }, 401);
+      }
+      return json({ error: "invalid_code" }, 401);
+    }
 
     await env.DB.prepare(`UPDATE login_tickets SET used_at = ?2 WHERE token_hash = ?1`).bind(tHash, now()).run();
     const token = await createSession(env, u.id, request);
