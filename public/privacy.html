@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kebijakan Privasi — menyurat</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<script>try{var t=localStorage.getItem("menyurat.theme2");if(t!=="dark"&&t!=="light")t="light";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="light"}</script>
+<style>
+  :root{
+    color-scheme:light;
+    --ground:#f9fbfc; --surface:#ffffff; --raised:#f4f6f8;
+    --border:#e8eaec; --text:#131416; --muted:#5d5f60;
+    --accent:#1b6c80; --radius:12px;
+    --font:"IBM Plex Sans",Inter,system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --ground:#0f1113; --surface:#16181b; --raised:#1b1e22;
+    --border:#282c31; --text:#e8eaed; --muted:#9aa0a6;
+    --accent:#4cc2dc;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--ground);color:var(--text);
+    font-family:var(--font);font-size:14.5px;line-height:1.65;
+    padding:32px 16px 64px;
+  }
+  .wrap{max-width:740px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:clamp(22px,4vw,40px)}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:18px;border-bottom:1px solid var(--border);margin-bottom:22px}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);font-weight:600;font-size:16px}
+  .brand svg{color:var(--accent)}
+  .back{color:var(--accent);text-decoration:none;font-size:13.5px;font-weight:500}
+  .back:hover{text-decoration:underline}
+  h1{margin:0 0 6px;font-size:24px;line-height:1.25}
+  .meta{color:var(--muted);font-size:13px;margin:0 0 24px}
+  h2{font-size:16.5px;margin:26px 0 8px}
+  p,ul{margin:0 0 14px;color:var(--text)}
+  ul{padding-left:20px}
+  li{margin-bottom:6px}
+  table{width:100%;border-collapse:collapse;margin:14px 0 18px;font-size:13.5px}
+  th,td{text-align:left;padding:10px 12px;border:1px solid var(--border)}
+  th{background:var(--raised);font-weight:600}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--raised);padding:2px 6px;border-radius:4px}
+  footer{margin-top:32px;padding-top:18px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;font-size:13px;color:var(--muted)}
+  footer a{color:var(--accent);text-decoration:none}
+  footer a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="top">
+      <a class="brand" href="/">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M2.5 5.5h15v9h-15z" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M2.5 6.2 10 11l7.5-4.8" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+        <span>menyurat</span>
+      </a>
+      <a class="back" href="/">&larr; Kembali ke Beranda</a>
+    </div>
+
+    <h1>Kebijakan Privasi</h1>
+    <p class="meta">Terakhir diperbarui: November 2026</p>
+
+    <p><strong>menyurat</strong> adalah layanan pengelolaan kotak masuk (inbox) sementara berbasis domain mandiri di atas infrastruktur Cloudflare Workers, D1, dan KV. Kebijakan ini menjelaskan secara transparan data apa yang disimpan, berapa lama disimpan, dan kapan data dihapus secara otomatis.</p>
+
+    <h2>1. Data Apa yang Disimpan</h2>
+    <ul>
+      <li><strong>Data Akun Pengguna:</strong> Alamat email pendaftaran, nama tampilan (opsional), peran akun (<code>member</code>, <code>vip</code>, <code>admin</code>, <code>owner</code>), hash kata sandi menggunakan algoritma <code>PBKDF2-SHA256</code> (100.000 iterasi dengan salt unik), serta secret 2FA TOTP apabila diaktifkan.</li>
+      <li><strong>Data Inbox &amp; Pesan Masuk:</strong> Alamat inbox sementara yang dibuat, catatan/label singkat, metadata pengirim (<code>From</code>, <code>To</code>, <code>Subject</code>), isi teks/HTML email, file email mentah (<code>.eml</code> untuk pesan &le; 6 MB), dan lampiran (hingga batas ukuran maksimum 15 MB per email).</li>
+      <li><strong>Data Account Matrix (Vault):</strong> Nama layanan, alamat inbox terkait, kredensial akun/catatan yang disimpan pengguna di dalam vault pribadi masing-masing.</li>
+      <li><strong>Data Keamanan &amp; Log Operasional:</strong> Hash token sesi login, hash API key (<code>SHA-256</code>), pencatatan percobaan login gagal (rate-limit &amp; lockout), serta log audit administratif.</li>
+    </ul>
+
+    <h2>2. Berapa Lama Data Disimpan (Masa Retensi)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Jenis Data</th>
+          <th>Masa Penyimpanan</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Inbox &amp; Email Masuk (Role <strong>Member</strong>)</td>
+          <td><strong>7 hari</strong> sejak alamat dibuat atau diperpanjang</td>
+        </tr>
+        <tr>
+          <td>Inbox &amp; Email Masuk (Role <strong>VIP &amp; Admin</strong>)</td>
+          <td><strong>1 jam hingga 90 hari</strong> (sesuai pilihan), atau selama berstatus <em>Disimpan Permanen (Pinned)</em></td>
+        </tr>
+        <tr>
+          <td>Inbox &amp; Email Masuk (Role <strong>Owner</strong>)</td>
+          <td><strong>1 jam hingga 365 hari</strong>, atau selama berstatus <em>Disimpan Permanen (Pinned)</em></td>
+        </tr>
+        <tr>
+          <td>Tiket Login 2FA &amp; Tautan Reset Sandi</td>
+          <td>Tiket 2FA: <strong>5 menit</strong>; Tautan reset: <strong>30 menit</strong> (rekaman antrean dibersihkan setelah <strong>7 hari</strong>)</td>
+        </tr>
+        <tr>
+          <td>Counter Rate-Limit &amp; Percobaan Login</td>
+          <td>Maksimal <strong>24 jam</strong></td>
+        </tr>
+        <tr>
+          <td>Log Audit Keamanan</td>
+          <td><strong>90 hari</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3. Kapan &amp; Bagaimana Data Dihapus Otomatis</h2>
+    <ul>
+      <li><strong>Pembersihan Terjadwal (Cron Otomatis Tiap 10 Menit):</strong> Worker menjalankan tugas terjadwal (<code>*/10 * * * *</code>) setiap 10 menit untuk menghapus secara permanen seluruh email, lampiran di KV/R2, file <code>.eml</code>, webhook, dan alamat inbox yang telah melewati waktu kedaluwarsa (<code>expires_at</code>) dan tidak berstatus disimpan permanen.</li>
+      <li><strong>Penghapusan Manual Seketika:</strong> Pengguna dapat menghapus pesan satuan, mengosongkan seluruh isi inbox, atau menghapus alamat inbox kapan saja. Penghapusan langsung memusnahkan baris di database D1 sekaligus objek file mentah/lampiran di penyimpanan KV/R2.</li>
+    </ul>
+
+    <h2>4. Perlindungan &amp; Privasi Pihak Ketiga</h2>
+    <p>Kami tidak menjual, membagikan, atau menyewakan data email maupun akun kepada pihak ketiga. Pemindaian keamanan antispam pada formulir autentikasi menggunakan Cloudflare Turnstile.</p>
+
+    <h2>5. Kontak</h2>
+    <p>Untuk pertanyaan terkait privasi, permintaan penghapusan akun, atau pelaporan penyalahgunaan, hubungi administrator melalui <a href="mailto:abuse@menyurat.me">abuse@menyurat.me</a>.</p>
+
+    <footer>
+      <span>&copy; 2026 menyurat</span>
+      <div>
+        <a href="/privacy">Kebijakan Privasi</a> &middot;
+        <a href="/terms">Ketentuan Layanan</a> &middot;
+        <a href="mailto:abuse@menyurat.me">Kontak</a>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

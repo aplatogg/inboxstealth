@@ -1,6 +1,6 @@
 /* menyurat service worker - cache aset statis, jaringan utama untuk HTML/API */
-const CACHE = "menyurat-v16";
-const ASSETS = ["/icon.svg", "/manifest.webmanifest", "/qrcode.js"];
+const CACHE = "menyurat-v17";
+const ASSETS = ["/icon.svg", "/manifest.webmanifest", "/qrcode.js", "/app.js"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).catch(() => {}));
