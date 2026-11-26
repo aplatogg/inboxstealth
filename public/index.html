@@ -971,6 +971,7 @@
           <span class="ttl" id="ttlInline">—</span>
           <button class="btn" id="copyBtn">Salin</button>
           <button class="btn" id="noteBtn" title="Catatan / label alamat">Label</button>
+          <button class="btn" id="openMatrixBtn" title="Buka &amp; kelola alamat ini di Account Matrix">⚡ Matrix</button>
           <button class="btn" id="qrBtn">QR</button>
           <button class="btn" id="exportBtn">Ekspor</button>
         </div>
@@ -1821,7 +1822,8 @@ async function enterApp(){
   if ($("navDash")) $("navDash").hidden = !isStaff();
   await loadDomains();
   loadAddresses();
-  loadMatrix();
+  const curHash = location.hash.replace(/^#\/?/, "");
+  if (curHash !== "matrix") loadMatrix({ silent: true });
   loadBanner();
   if (isStaff()) await loadUsers();
   route();
@@ -1872,7 +1874,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAcct(
 on("acctLogout", "click", async () => {
   try { await api("/api/auth/logout", { method: "POST" }); } catch {}
   state.me = null; state.address = ""; state.pinned = false; state.messages = []; state.selected = null;
-  state.matrixList = []; state.addressList = [];
+  state.matrixList = []; state.addressList = []; state.mxSeenOtps = null; state.mxSeenReady = false;
   if ($("navMatrix")) $("navMatrix").textContent = "0";
   if ($("navAddr")) $("navAddr").textContent = "0";
   store.address = ""; store.expires = 0; store.pinned = false;
@@ -2199,7 +2201,7 @@ async function createInbox(local, domain, ttlSec, note){
     state.messages = []; state.selected = null; state.read = new Set(); state.seen = null; state.seenReady = false;
     store.address = j.address; store.expires = j.expires_at; store.pinned = state.pinned;
     store.domain = j.domain || domain; store.read = state.read;
-    render(); loadInbox(); connectSSE(); loadAddresses();
+    render(); loadInbox(); connectSSE(); loadAddresses(); loadMatrix({ silent: true });
     toast("Alamat dibuat: " + j.address);
   } catch (e){
     const map = {
@@ -2475,6 +2477,7 @@ async function openMessage(id){
       state.messages = state.messages.filter((x) => x.id !== id);
       state.selected = null;
       renderEmptyRead(); renderList(); renderTitle();
+      loadAddresses(); loadMatrix({ silent: true });
     });
   } catch (e){
     col.innerHTML = '<div class="read-empty">Pesan gagal dimuat: ' + esc(e.message) + "</div>";
@@ -2920,6 +2923,7 @@ function renderAddresses(){
           <summary class="btn btn-sm more-btn" title="Menu aksi" aria-label="Menu aksi">⋯</summary>
           <div class="menu-pop">
             <button type="button" class="menu-item" data-copy="${escAttr(a.address)}">Salin alamat</button>
+            <button type="button" class="menu-item" data-open-mx="${escAttr(a.address)}">⚡ Buka di Account Matrix</button>
             <button type="button" class="menu-item" data-note="${escAttr(a.address)}" data-cur-note="${escAttr(a.note || "")}">Label / catatan</button>
             <button type="button" class="menu-item" data-extend="${escAttr(a.address)}">Perpanjang masa aktif</button>
             <button type="button" class="menu-item" data-pin="${escAttr(a.address)}" data-pinned="${pinned ? 1 : 0}">${pinned ? "Lepas simpanan permanen" : "Simpan permanen"}</button>
@@ -2971,6 +2975,8 @@ function renderAddresses(){
       try { await navigator.clipboard.writeText(b.dataset.copy); toast("Alamat disalin"); }
       catch { toast("Gagal menyalin", true); }
     }));
+  wrap.querySelectorAll("[data-open-mx]").forEach((b) =>
+    b.addEventListener("click", () => jumpToMatrixForAddress(b.dataset.openMx)));
   wrap.querySelectorAll("[data-note]").forEach((b) =>
     b.addEventListener("click", () => openNoteDialog(b.dataset.note, b.dataset.curNote || "")));
   wrap.querySelectorAll("[data-sel]").forEach((b) =>
@@ -3018,8 +3024,20 @@ function renderAddresses(){
           state.messages = []; state.selected = null; render();
         }
         loadAddresses();
+        loadMatrix({ silent: true });
       } catch (e){ toast("Gagal: " + e.message, true); }
     }));
+}
+
+function jumpToMatrixForAddress(address){
+  if (!address) return;
+  state.mxQuery = address;
+  state.mxStatus = "all";
+  if ($("mxSearch")) $("mxSearch").value = address;
+  location.hash = "#/matrix";
+  route();
+  renderMatrix();
+  toast("⚡ Menampilkan " + address + " di Account Matrix");
 }
 
 /* ---------- AccountMatrix (#/matrix) ---------- */
@@ -3078,17 +3096,45 @@ async function tickMatrixTotp(){
   }
 }
 
-async function loadMatrix(){
+async function loadMatrix(opts = {}){
+  if (loadMatrix._busy) return;
+  loadMatrix._busy = true;
   try {
     const j = await api("/api/matrix");
-    state.matrixList = j.accounts || [];
-    if (j.auto_synced && j.auto_synced > 0) {
+    const nextList = j.accounts || [];
+    if (!state.mxSeenOtps) {
+      state.mxSeenOtps = new Map();
+      state.mxSeenReady = false;
+    }
+    const freshOtps = [];
+    for (const acc of nextList) {
+      const prevOtp = state.mxSeenOtps.get(acc.id) || null;
+      if (state.mxSeenReady && acc.email_otp && acc.email_otp !== prevOtp) {
+        freshOtps.push(acc);
+      }
+      state.mxSeenOtps.set(acc.id, acc.email_otp || null);
+    }
+    state.mxSeenReady = true;
+    state.matrixList = nextList;
+    if (!opts.silent && j.auto_synced && j.auto_synced > 0) {
       toast("⚡ Auto-Sync: " + j.auto_synced + " akun terdeteksi otomatis dari inbox");
     }
+    if (freshOtps.length > 0) {
+      const top = freshOtps[0];
+      nsPlay();
+      if (nsPrefs().autoOtp || state.view === "matrix") {
+        try { await navigator.clipboard.writeText(top.email_otp); } catch {}
+        toast("🔑 OTP Baru (" + top.service + ") disalin: " + top.email_otp);
+      } else {
+        toast("🔑 OTP Baru (" + top.service + "): " + top.email_otp);
+      }
+    }
   } catch {
-    state.matrixList = [];
+    if (!state.matrixList) state.matrixList = [];
+  } finally {
+    loadMatrix._busy = false;
   }
-  if ($("navMatrix")) $("navMatrix").textContent = String(state.matrixList.length);
+  if ($("navMatrix")) $("navMatrix").textContent = String((state.matrixList || []).length);
   renderMatrix();
   if (state.view === "matrix") renderTitle();
 }
@@ -3422,6 +3468,15 @@ async function spawnMatrixAccount(presetService, presetDays){
       if ($(id)) $(id).value = "";
     }
     try { await navigator.clipboard.writeText(acc.address); } catch {}
+    // Set newly spawned address as active inbox in menyurat.me so live SSE immediately watches it
+    state.address = acc.address;
+    state.expires = Date.now() + 14 * 86400_000;
+    state.pinned  = true;
+    state.note    = acc.tag ? `${acc.service} (${acc.tag})` : acc.service;
+    state.messages = []; state.selected = null; state.read = new Set(); state.seen = null; state.seenReady = false;
+    store.address = state.address; store.expires = state.expires; store.pinned = state.pinned;
+    render();
+    connectSSE();
     toast("⚡ Spawn " + acc.service + " sukses! Email disalin: " + acc.address);
     await loadMatrix();
     loadAddresses();
@@ -3510,7 +3565,8 @@ async function saveMatrixEdit(){
     });
     dlg.close();
     toast("Vault akun diperbarui");
-    loadMatrix();
+    loadMatrix({ silent: true });
+    loadAddresses();
   } catch (e) {
     if (msg) showMsg(msg, "Gagal menyimpan: " + e.message, "err");
   }
@@ -4293,6 +4349,8 @@ function connectSSE(){
           const nextLatestId = d.latest ? d.latest.id : null;
           if (d.count !== state.messages.length || nextLatestId !== curLatestId) {
             loadInbox();
+            loadAddresses();
+            loadMatrix({ silent: true });
           }
         }
       } catch {}
@@ -4313,9 +4371,14 @@ function connectSSE(){
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && state.me && state.address) {
-    loadInbox();
-    if (!evtSource) connectSSE();
+  if (!document.hidden && state.me) {
+    if (state.address) {
+      loadInbox();
+      if (!evtSource) connectSSE();
+    }
+    if (state.view === "matrix") {
+      loadMatrix({ silent: true });
+    }
   }
 });
 window.addEventListener("hashchange", route);
@@ -4366,6 +4429,7 @@ on("acctTheme", "click", () => {
 on("themeToggle", "change", (e) => setTheme(e.target.checked ? "dark" : "light"));
 on("qrBtn", "click", () => { if (state.address) openQr(state.address); });
 on("noteBtn", "click", () => { if (state.address) openNoteDialog(state.address, state.note || ""); });
+on("openMatrixBtn", "click", () => { if (state.address) jumpToMatrixForAddress(state.address); });
 on("noteCancel", "click", () => { const d = $("noteDlg"); if (d) d.close(); });
 on("noteSave", "click", async () => {
   const d = $("noteDlg"); if (!d) return;
@@ -4387,6 +4451,7 @@ on("noteSave", "click", async () => {
     }
     toast(j.note ? "Label disimpan" : "Label dihapus");
     loadAddresses();
+    loadMatrix({ silent: true });
   } catch (e) { toast("Gagal menyimpan label: " + e.message, true); }
 });
 $("noteInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("noteSave").click(); } });
@@ -4469,6 +4534,7 @@ on("clearMsgsBtn", "click", async () => {
     store.read = state.read;
     renderList(); renderTitle(); renderEmptyRead();
     loadAddresses();
+    loadMatrix({ silent: true });
     toast("Semua pesan di inbox dikosongkan");
   } catch (e) {
     toast("Gagal mengosongkan pesan: " + e.message, true);
@@ -4740,6 +4806,7 @@ async function bulkDelete(){
   state.sel.clear();
   toast("Dihapus: " + ok + (fail ? ", gagal: " + fail : ""));
   loadAddresses();
+  loadMatrix({ silent: true });
 }
 function bulkExport(){
   const list = [...(state.sel || [])];
@@ -4779,6 +4846,7 @@ function bulkExport(){
   }
   if (state.address) { loadInbox(); connectSSE(); }
   setInterval(() => { if (state.me && state.address && !evtSource) loadInbox(); }, 15000);
+  setInterval(() => { if (state.me && state.view === "matrix" && !document.hidden) loadMatrix({ silent: true }); }, 8000);
   setInterval(() => { if (state.me && isStaff() && state.view === "users") loadUsers(); }, 20000);
 })();
 </script>

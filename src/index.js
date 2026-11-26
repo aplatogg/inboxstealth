@@ -515,6 +515,34 @@ async function ensureInbox(env, address, domain, userId = null, ttlSec = null, n
   return { address, domain, created_at: t, expires_at: exp, note: cleanNote };
 }
 
+// Auto-restore or keep alive an inbox if it is registered as an active account in AccountMatrix
+async function inboxRowOrRestoreFromMatrix(env, address) {
+  let box = await inboxRow(env, address);
+  const t = now();
+  if (box && (box.expires_at > t || box.pinned === 1)) return box;
+  try {
+    const mx = await env.DB.prepare(
+      `SELECT user_id, service, tag FROM matrix_accounts WHERE address = ?1 AND status != 'archived' ORDER BY updated_at DESC LIMIT 1`
+    ).bind(address).first();
+    if (!mx || !mx.user_id) return box;
+    const domain = address.split("@")[1] || "";
+    const u = await env.DB.prepare(`SELECT role FROM users WHERE id = ?1`).bind(mx.user_id).first();
+    const role = u ? u.role : "member";
+    const ttl = TTL_ROLE[role] || 14 * 86400;
+    const note = (mx.tag && mx.tag !== "#Auto" && mx.tag !== "#Inbox") ? `${mx.service} (${mx.tag})` : mx.service;
+    await ensureInbox(env, address, domain, mx.user_id, ttl, note);
+    const newExp = t + ttl * 1000;
+    if (role !== "member") {
+      await env.DB.prepare(`UPDATE inboxes SET pinned = 1 WHERE address = ?1`).bind(address).run();
+    } else {
+      await env.DB.prepare(`UPDATE messages SET expires_at = ?2 WHERE inbox = ?1 AND expires_at < ?2`).bind(address, newExp).run();
+    }
+    return await inboxRow(env, address);
+  } catch {
+    return box;
+  }
+}
+
 // owner: semua. admin: vip/member (termasuk inbox tak bertuan). vip/member: miliknya.
 async function canSee(env, user, box) {
   if (!box) return false;
@@ -694,8 +722,8 @@ async function handleEmail(message, env) {
   if (!to.includes("@")) return;
   const row = await getDomain(env, to.split("@")[1]);
   if (!row || !row.is_active) return;
-  // Cek eksistensi dan masa aktif inbox sebelum membaca stream email mentah ke RAM
-  const box = await inboxRow(env, to);
+  // Cek eksistensi dan masa aktif inbox (atau auto-restore jika terdaftar di AccountMatrix) sebelum membaca stream email
+  const box = await inboxRowOrRestoreFromMatrix(env, to);
   if (!box || (box.expires_at <= now() && !box.pinned)) return;
   const maxBytes = maxMailBytes(env);
   const bytes = await streamToBytes(message.raw, maxBytes + 1);
@@ -1402,7 +1430,7 @@ async function handleEvents(request, env, url, user) {
   const rl = await hitRate(env, "sse|" + ipOf(request), 60, 5 * 60_000);
   if (!rl.ok) return json({ error: "too_many_requests", retry_after: rl.retry }, 429);
   const address = (url.searchParams.get("address") || "").toLowerCase();
-  const box = await inboxRow(env, address);
+  const box = await inboxRowOrRestoreFromMatrix(env, address);
   if (!box) return json({ error: "inbox_not_found" }, 404);
   if (!(await canSee(env, user, box))) return json({ error: "not_found" }, 404);
 
@@ -1542,6 +1570,7 @@ if (p === "/api/domains" && method === "GET") return json({ domains: await listD
       if (!res.conflict) { info = res; break; }
     }
     if (!info) return json({ error: "address_collision_retry" }, 409);
+    await ensureMatrixForInbox(env, user.id, info.address, note);
     await audit(env, user, "inbox.create", info.address, null, request);
     return json({ ...info, ttl_seconds: Math.round((info.expires_at - info.created_at) / 1000) });
   }
@@ -1565,10 +1594,12 @@ if (p === "/api/domains" && method === "GET") return json({ domains: await listD
       const q = await quotaCheck(env, user, r.domain);
       if (q) return json(q, 429);
     }
-    const info = await ensureInbox(env, address, r.domain, user.id, ttlFor(user, qp.get("ttl")), qp.get("note") || null);
+    const note = qp.get("note") || null;
+    const info = await ensureInbox(env, address, r.domain, user.id, ttlFor(user, qp.get("ttl")), note);
     if (info.conflict) {
       return json({ error: "address_taken", note: "Alamat ini sedang digunakan oleh pengguna lain." }, 409);
     }
+    await ensureMatrixForInbox(env, user.id, address, note);
     await audit(env, user, "inbox.create", address, null, request);
     return json({ ...info, ttl_seconds: Math.round((info.expires_at - info.created_at) / 1000) });
   }
@@ -1699,7 +1730,7 @@ return json({ inboxes: results || [] });
   const mInbox = p.match(/^\/api\/inbox\/([^/]+)$/);
   if (mInbox && method === "GET") {
     const address = decodeURIComponent(mInbox[1]).toLowerCase();
-    const box = await inboxRow(env, address);
+    const box = await inboxRowOrRestoreFromMatrix(env, address);
     if (!box) return json({ error: "inbox_not_found", address }, 404);
     if (!(await canSee(env, user, box))) return json({ error: "not_found" }, 404);
     return json({ address, domain: box.domain, expires_at: box.expires_at, pinned: box.pinned, note: box.note || null, messages: await listMessages(env, address) });
@@ -1724,6 +1755,14 @@ return json({ inboxes: results || [] });
 
     await purgeInboxContents(env, address);
     await env.DB.prepare(`DELETE FROM inboxes WHERE address = ?1`).bind(address).run();
+    // Auto-archive empty auto-synced Matrix entries for this deleted inbox so #/matrix stays clean
+    try {
+      await env.DB.prepare(
+        `UPDATE matrix_accounts SET status = 'archived', updated_at = ?2
+          WHERE address = ?1 AND (tag = '#Auto' OR tag = '#Inbox')
+            AND totp_secret IS NULL AND api_key IS NULL AND recovery_codes IS NULL`
+      ).bind(address, now()).run();
+    } catch {}
     await audit(env, user, "inbox.delete", address, { owner: box.user_id }, request);
     return json({ ok: true, address });
   }
@@ -1731,7 +1770,7 @@ return json({ inboxes: results || [] });
   // pin/unpin, extend TTL, atau simpan catatan/label singkat per alamat
   if (mInbox && method === "PATCH") {
     const address = decodeURIComponent(mInbox[1]).toLowerCase();
-    const box = await inboxRow(env, address);
+    const box = await inboxRowOrRestoreFromMatrix(env, address);
     if (!box) return json({ error: "inbox_not_found" }, 404);
     const own = box.user_id && box.user_id === user.id;
     if (!own && !isStaff(user)) return json({ error: "forbidden" }, 403);
@@ -1740,6 +1779,20 @@ return json({ inboxes: results || [] });
     if (body && body.note !== undefined) {
       const cleanNote = String(body.note || "").trim().slice(0, 120) || null;
       await env.DB.prepare(`UPDATE inboxes SET note = ?2 WHERE address = ?1`).bind(address, cleanNote).run();
+      // Sync label update to AccountMatrix if this inbox has a single account or an Auto-Detect placeholder
+      if (cleanNote && box.user_id) {
+        try {
+          const { results: mxRows } = await env.DB.prepare(
+            `SELECT id, service FROM matrix_accounts WHERE user_id = ?1 AND address = ?2 AND status != 'archived'`
+          ).bind(box.user_id, address).all();
+          const list = mxRows || [];
+          const targetRow = list.find((r) => isAutoDetectPlaceholder(r.service)) || (list.length === 1 ? list[0] : null);
+          if (targetRow) {
+            await env.DB.prepare(`UPDATE matrix_accounts SET service = ?2, updated_at = ?3 WHERE id = ?1`)
+              .bind(targetRow.id, cleanNote.slice(0, 60), now()).run();
+          }
+        } catch {}
+      }
       await audit(env, user, "inbox.note", address, { note: cleanNote }, request);
       if (body.ttl === undefined && body.days === undefined && body.pinned === undefined) {
         return json({ ok: true, address, note: cleanNote });
@@ -1785,7 +1838,7 @@ return json({ inboxes: results || [] });
   if (mMsg) {
     const address = decodeURIComponent(mMsg[1]).toLowerCase();
     const id = decodeURIComponent(mMsg[2]);
-    const box = await inboxRow(env, address);
+    const box = await inboxRowOrRestoreFromMatrix(env, address);
     if (!box) return json({ error: "inbox_not_found" }, 404);
     if (!(await canSee(env, user, box))) return json({ error: "not_found" }, 404);
 
@@ -2132,6 +2185,26 @@ function matchServiceFuzzy(targetSvcRaw, detectedSvcRaw, fromAddr, fromName, sub
   return tokens.some((tk) => hay.includes(tk));
 }
 
+async function ensureMatrixForInbox(env, userId, address, note = null, nowMs = now()) {
+  if (!userId || !address) return;
+  try {
+    const existing = await env.DB.prepare(
+      `SELECT id FROM matrix_accounts WHERE user_id = ?1 AND address = ?2 AND status != 'archived' LIMIT 1`
+    ).bind(userId, address).first();
+    if (existing) return;
+    const cleanSvc = (note && String(note).trim()) ? String(note).trim().slice(0, 60) : "Auto-Detect";
+    const localPart = address.split("@")[0] || "user";
+    const username = localPart.replace(/[._-]/g, "");
+    const password = generateStrongPassword(18);
+    await env.DB.prepare(
+      `INSERT INTO matrix_accounts
+         (id, user_id, service, tag, address, username, password, totp_secret,
+          api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
+       VALUES (?1,?2,?3,'#Inbox',?4,?5,?6,NULL,NULL,NULL,'Dibuat dari Inbox menyurat.me','active',NULL,?7,?7)`
+    ).bind(crypto.randomUUID(), userId, cleanSvc, address, username, password, nowMs).run();
+  } catch {}
+}
+
 async function autoRegisterMatrixFromEmail(env, userId, inboxAddr, fromAddr, fromName, subject, receivedAt = now()) {
   if (!userId || !inboxAddr) return;
   const service = detectServiceFromEmail(fromAddr, fromName, subject);
@@ -2161,9 +2234,12 @@ async function autoRegisterMatrixFromEmail(env, userId, inboxAddr, fromAddr, fro
   const placeholder = rows.find((r) => r.status !== "archived" && isAutoDetectPlaceholder(r.service));
   if (placeholder) {
     const nextStatus = detStatus === "burned" ? "burned" : (detStatus === "cooldown" && placeholder.status === "active" ? "cooldown" : placeholder.status);
-    await env.DB.prepare(
-      `UPDATE matrix_accounts SET service = ?2, status = ?3, updated_at = ?4 WHERE id = ?1`
-    ).bind(placeholder.id, service, nextStatus, receivedAt).run();
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE matrix_accounts SET service = ?2, status = ?3, updated_at = ?4 WHERE id = ?1`)
+        .bind(placeholder.id, service, nextStatus, receivedAt),
+      env.DB.prepare(`UPDATE inboxes SET note = ?2 WHERE address = ?1 AND (note IS NULL OR note = '' OR LOWER(note) LIKE 'auto-detect%')`)
+        .bind(inboxAddr, service),
+    ]);
     return;
   }
 
@@ -2180,12 +2256,16 @@ async function autoRegisterMatrixFromEmail(env, userId, inboxAddr, fromAddr, fro
 
   const localPart = inboxAddr.split("@")[0] || "user";
   const username = localPart.replace(/[._-]/g, "");
-  await env.DB.prepare(
-    `INSERT INTO matrix_accounts
-       (id, user_id, service, tag, address, username, password, totp_secret,
-        api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
-     VALUES (?1,?2,?3,'#Auto',?4,?5,NULL,NULL,NULL,NULL,'Auto-detected dari email masuk',?6,NULL,?7,?7)`
-  ).bind(crypto.randomUUID(), userId, service, inboxAddr, username, detStatus, receivedAt).run();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO matrix_accounts
+         (id, user_id, service, tag, address, username, password, totp_secret,
+          api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
+       VALUES (?1,?2,?3,'#Auto',?4,?5,NULL,NULL,NULL,NULL,'Auto-detected dari email masuk',?6,NULL,?7,?7)`
+    ).bind(crypto.randomUUID(), userId, service, inboxAddr, username, detStatus, receivedAt),
+    env.DB.prepare(`UPDATE inboxes SET note = ?2 WHERE address = ?1 AND (note IS NULL OR note = '')`)
+      .bind(inboxAddr, service),
+  ]);
 }
 
 async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
@@ -2287,6 +2367,28 @@ async function syncMatrixFromInboxes(env, userId, nowMs = now()) {
       g.first_at,
       g.last_at
     ).run();
+    byAddr.set(g.address, (byAddr.get(g.address) || []).concat([{ address: g.address, service: g.service, tag, status }]));
+    added++;
+  }
+
+  // Also sync active inboxes from menyurat.me (#/addresses) that have 0 messages so far
+  const { results: activeBoxes } = await env.DB.prepare(
+    `SELECT address, note, created_at FROM inboxes WHERE user_id = ?1 AND (expires_at > ?2 OR pinned = 1)`
+  ).bind(userId, nowMs).all();
+  for (const b of activeBoxes || []) {
+    const addr = b.address.toLowerCase();
+    if (byAddr.has(addr)) continue;
+    const svc = (b.note && String(b.note).trim()) ? String(b.note).trim().slice(0, 60) : "Auto-Detect";
+    const localPart = addr.split("@")[0] || "user";
+    const username = localPart.replace(/[._-]/g, "");
+    const t = b.created_at || nowMs;
+    await env.DB.prepare(
+      `INSERT INTO matrix_accounts
+         (id, user_id, service, tag, address, username, password, totp_secret,
+          api_key, recovery_codes, opsec_note, status, expires_at, created_at, updated_at)
+       VALUES (?1,?2,?3,'#Inbox',?4,?5,?6,NULL,NULL,NULL,'Auto-synced dari daftar alamat menyurat.me','active',NULL,?7,?7)`
+    ).bind(crypto.randomUUID(), userId, svc, addr, username, generateStrongPassword(18), t).run();
+    byAddr.set(addr, [{ address: addr, service: svc, tag: "#Inbox", status: "active" }]);
     added++;
   }
   return added;
@@ -2323,8 +2425,12 @@ async function enrichMatrixAccount(env, row, nowMs = now(), preloadedMsgs = null
       currentService = firstDetected;
       row.service = firstDetected;
       try {
-        await env.DB.prepare(`UPDATE matrix_accounts SET service = ?2, updated_at = ?3 WHERE id = ?1`)
-          .bind(row.id, firstDetected, allMsgs[0].received_at || nowMs).run();
+        await env.DB.batch([
+          env.DB.prepare(`UPDATE matrix_accounts SET service = ?2, updated_at = ?3 WHERE id = ?1`)
+            .bind(row.id, firstDetected, allMsgs[0].received_at || nowMs),
+          env.DB.prepare(`UPDATE inboxes SET note = ?2 WHERE address = ?1 AND (note IS NULL OR note = '' OR LOWER(note) LIKE 'auto-detect%')`)
+            .bind(row.address, firstDetected),
+        ]);
       } catch {}
     }
   }
@@ -2638,6 +2744,15 @@ async function handleMatrixApi(request, env, url, user, p, method) {
         apiKey, recCodes, opsecNote, status, expiresAt, t
       ).run();
 
+      // Sync updated service/tag back to inboxes.note if this inbox belongs to the user
+      if (b.service !== undefined || b.tag !== undefined) {
+        try {
+          const boxNote = (tag && tag !== "#Auto" && tag !== "#Inbox") ? `${service} (${tag})` : service;
+          await env.DB.prepare(`UPDATE inboxes SET note = ?2 WHERE address = ?1 AND user_id = ?3`)
+            .bind(row.address, boxNote.slice(0, 120), row.user_id).run();
+        } catch {}
+      }
+
       const updated = await env.DB.prepare(`SELECT * FROM matrix_accounts WHERE id = ?1`).bind(id).first();
       return json({ ok: true, account: await enrichMatrixAccount(env, updated, t) });
     }
@@ -2734,7 +2849,11 @@ export default {
   async scheduled(event, env) {
     const t = now();
     const { results: dead } = await env.DB.prepare(
-      `SELECT id, inbox, raw_key FROM messages WHERE expires_at <= ?1 AND inbox NOT IN (SELECT address FROM inboxes WHERE pinned = 1) LIMIT 200`
+      `SELECT id, inbox, raw_key FROM messages
+        WHERE expires_at <= ?1
+          AND inbox NOT IN (SELECT address FROM inboxes WHERE pinned = 1)
+          AND inbox NOT IN (SELECT address FROM matrix_accounts WHERE status != 'archived')
+        LIMIT 200`
     ).bind(t).all();
     const deadRows = dead || [];
     if (deadRows.length) {
@@ -2755,7 +2874,8 @@ export default {
     await env.DB.batch([
       env.DB.prepare(
         `DELETE FROM inboxes WHERE expires_at <= ?1 AND pinned = 0
-         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.inbox = inboxes.address)`
+         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.inbox = inboxes.address)
+         AND address NOT IN (SELECT address FROM matrix_accounts WHERE status != 'archived')`
       ).bind(t),
       env.DB.prepare(`DELETE FROM webhooks WHERE address NOT IN (SELECT address FROM inboxes)`),
       env.DB.prepare(`DELETE FROM password_resets WHERE (expires_at > 0 AND expires_at <= ?1) OR created_at <= ?2`).bind(t, t - 7 * 86400_000),
