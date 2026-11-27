@@ -1,5 +1,5 @@
 /* menyurat service worker - cache aset statis, jaringan utama untuk HTML/API */
-const CACHE = "menyurat-v18";
+const CACHE = "menyurat-v19";
 const ASSETS = ["/icon.svg", "/manifest.webmanifest", "/qrcode.js", "/app.js"];
 
 self.addEventListener("install", (e) => {

@@ -18,7 +18,8 @@ const state = {
   filter: "all", query: "", address: store.address, expires: store.expires, pinned: store.pinned,
   read: store.read, view: "inbox", pending: 0, userFilter: "all", users: [], resetRequests: [], lastReset: null, keys: [], audit: [], addressList: [], adminDomains: [], pendingTicket: null,
   stats: null, announcements: [], addrQuery: "", sel: new Set(),
-  matrixList: [], mxQuery: "", mxStatus: "all"
+  matrixList: [], mxQuery: "", mxStatus: "all",
+  allMessages: [], allSelected: null, allSelectedAddr: "", allFilter: "all", allAddrFilter: "", allQuery: "", allSeen: null, allSeenReady: false
 };
 
 function api(path, opts){
@@ -318,6 +319,7 @@ async function enterApp(){
   loadAddresses();
   const curHash = location.hash.replace(/^#\/?/, "");
   if (curHash !== "matrix") loadMatrix({ silent: true });
+  if (curHash !== "all") loadAllInbox({ silent: true });
   loadBanner();
   if (isStaff()) await loadUsers();
   route();
@@ -325,6 +327,7 @@ async function enterApp(){
   nsInit();
   nsEnsureCustomLoaded().catch(() => {});
   if (state.address) { loadInbox(); connectSSE(); }
+  if (state.view === "all") connectAllSSE();
 }
 
 function closeAcct(){
@@ -798,68 +801,88 @@ function estimateIframeHeight(htmlBody, textBody){
   return Math.round(Math.max(280, Math.min(est, 680)));
 }
 
-async function openMessage(id){
-  state.selected = id;
-  state.read.add(id); store.read = state.read;
-  renderList();
-  const col = $("readCol");
+async function renderMessageIntoColumn(col, listColId, targetAddress, id, opts = {}){
+  if (!col) return;
   col.classList.remove("expanded");
   col.innerHTML = '<div class="read-empty">Memuat pesan.</div>';
   if (window.matchMedia && window.matchMedia("(max-width: 820px)").matches) {
     setTimeout(() => { try { col.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 40);
   }
   try {
-    const m = await api("/api/message/" + encodeURIComponent(state.address) + "/" + encodeURIComponent(id));
+    const m = await api("/api/message/" + encodeURIComponent(targetAddress) + "/" + encodeURIComponent(id));
     const hasHtml = !!m.html_body;
     const extImgs = hasHtml && hasExternalImages(m.html_body);
     const otp = extractOtp(m.subject, m.text_body, m.html_body);
     const vLink = extractVerifyLink(m.text_body, m.html_body);
     const smartBar = (otp || vLink)
       ? `<div class="smart-extract-bar">
-          ${otp ? `<button type="button" class="smart-otp-btn" id="smartOtpBtn" data-otp="${escAttr(otp)}" title="Klik untuk salin kode OTP">Salin OTP: <b>${esc(otp)}</b></button>` : ""}
+          ${otp ? `<button type="button" class="smart-otp-btn" data-role="smartOtpBtn" data-otp="${escAttr(otp)}" title="Klik untuk salin kode OTP">Salin OTP: <b>${esc(otp)}</b></button>` : ""}
           ${vLink ? `<a class="smart-link-btn" href="${escAttr(vLink.url)}" target="_blank" rel="noopener noreferrer" title="${escAttr(vLink.url)}">${esc(vLink.label)} &nearr;</a>
-          <button type="button" class="smart-otp-btn" id="smartCopyLinkBtn" data-url="${escAttr(vLink.url)}" title="Salin tautan verifikasi ke clipboard">Salin Link</button>` : ""}
+          <button type="button" class="smart-otp-btn" data-role="smartCopyLinkBtn" data-url="${escAttr(vLink.url)}" title="Salin tautan verifikasi ke clipboard">Salin Link</button>` : ""}
         </div>`
+      : "";
+    const jumpInboxBtn = opts.showOpenInbox
+      ? `<button type="button" class="btn btn-sm" data-role="openInSingleInbox" title="Buka alamat ${escAttr(targetAddress)} di tab Inbox">Buka di Inbox</button>`
       : "";
     col.innerHTML = `
       <div class="read-head">
-        <button type="button" class="btn btn-sm mobile-back-btn" id="mobileBackToList">&uarr; Daftar pesan</button>
+        <button type="button" class="btn btn-sm mobile-back-btn" data-role="mobileBackToList">&uarr; Daftar pesan</button>
         <h2 class="read-subject">${esc(m.subject || "(tanpa subjek)")}</h2>
         <div class="read-meta">dari <b>${esc(m.from_name || m.from_addr || "—")}</b>
           ${m.from_addr ? "&lt;" + esc(m.from_addr) + "&gt;" : ""}
-          · ${new Date(m.received_at).toLocaleString("id-ID")}</div>
+          · ${new Date(m.received_at).toLocaleString("id-ID")}
+          ${opts.showOpenInbox ? ` · ke <span class="mono">${esc(targetAddress)}</span>` : ""}</div>
         ${smartBar}
       </div>
       ${hasHtml ? `<div class="read-tabs">
-        <button class="tab" id="rHtml" aria-selected="true">HTML</button>
-        <button class="tab" id="rText" aria-selected="false">Teks</button>
+        <button class="tab" data-role="rHtml" aria-selected="true">HTML</button>
+        <button class="tab" data-role="rText" aria-selected="false">Teks</button>
         <span style="margin-left:auto;display:inline-flex;gap:6px;align-items:center">
-          ${extImgs ? '<button class="btn btn-sm" id="rImgToggle" type="button">Sembunyikan gambar</button>' : ""}
-          <button class="btn btn-sm" id="rExpandToggle" type="button" title="Perbesar area baca email">Perbesar</button>
+          ${jumpInboxBtn}
+          ${extImgs ? '<button class="btn btn-sm" data-role="rImgToggle" type="button">Sembunyikan gambar</button>' : ""}
+          <button class="btn btn-sm" data-role="rExpandToggle" type="button" title="Perbesar area baca email">Perbesar</button>
         </span>
-      </div>` : ""}
-      <div class="read-body" id="readBody"></div>
+      </div>` : (jumpInboxBtn ? `<div class="read-tabs">${jumpInboxBtn}</div>` : "")}
+      <div class="read-body" data-role="readBody"></div>
       <div class="read-foot">
-        <button class="btn" id="delBtn">Hapus pesan</button>
+        <button class="btn" data-role="delBtn">Hapus pesan</button>
         ${m.has_eml
-          ? `<a class="btn" href="/api/message/${encodeURIComponent(state.address)}/${encodeURIComponent(id)}/eml" title="File email mentah (.eml): header, isi, dan lampiran ter-encode. Untuk arsip/forensik.">Email mentah (.eml)</a>`
+          ? `<a class="btn" href="/api/message/${encodeURIComponent(targetAddress)}/${encodeURIComponent(id)}/eml" title="File email mentah (.eml): header, isi, dan lampiran ter-encode. Untuk arsip/forensik.">Email mentah (.eml)</a>`
           : `<span class="btn" aria-disabled="true" title="Pesan lebih dari 6 MB: arsip .eml tidak disimpan, tapi lampiran tetap bisa diunduh.">Email mentah tidak diarsipkan</span>`}
         <dl class="kv" style="margin-left:auto">
-          <dt>ke</dt><dd class="mono">${esc(m.to_addr || state.address)}</dd>
+          <dt>ke</dt><dd class="mono">${esc(m.to_addr || targetAddress)}</dd>
           <dt>ukuran</dt><dd>${fmtSize(m.raw_size)}</dd>
         </dl>
       </div>`;
 
-    if ($("mobileBackToList")) {
-      $("mobileBackToList").addEventListener("click", () => {
-        const lc = $("listCol") || document.querySelector(".list-col");
+    const q = (role) => col.querySelector(`[data-role="${role}"]`);
+
+    if (q("mobileBackToList")) {
+      q("mobileBackToList").addEventListener("click", () => {
+        const lc = $(listColId) || col.parentElement?.querySelector(".list-col");
         if (lc) { try { lc.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }
       });
     }
 
-    if ($("smartOtpBtn")) {
-      $("smartOtpBtn").addEventListener("click", async () => {
-        const code = $("smartOtpBtn").dataset.otp;
+    if (q("openInSingleInbox")) {
+      q("openInSingleInbox").addEventListener("click", () => {
+        const box = (state.addressList || []).find((a) => a.address === targetAddress);
+        state.address = targetAddress;
+        state.expires = box ? box.expires_at : (Date.now() + 86400_000);
+        state.pinned = box ? !!box.pinned : false;
+        state.note = box ? (box.note || null) : null;
+        state.selected = id;
+        store.address = targetAddress; store.expires = state.expires; store.pinned = state.pinned;
+        location.hash = "#/inbox";
+        render();
+        loadInbox().then(() => openMessage(id));
+        connectSSE();
+      });
+    }
+
+    if (q("smartOtpBtn")) {
+      q("smartOtpBtn").addEventListener("click", async () => {
+        const code = q("smartOtpBtn").dataset.otp;
         try {
           await navigator.clipboard.writeText(code);
           toast("Kode OTP disalin: " + code);
@@ -868,9 +891,9 @@ async function openMessage(id){
         }
       });
     }
-    if ($("smartCopyLinkBtn")) {
-      $("smartCopyLinkBtn").addEventListener("click", async () => {
-        const u = $("smartCopyLinkBtn").dataset.url;
+    if (q("smartCopyLinkBtn")) {
+      q("smartCopyLinkBtn").addEventListener("click", async () => {
+        const u = q("smartCopyLinkBtn").dataset.url;
         try {
           await navigator.clipboard.writeText(u);
           toast("Tautan verifikasi disalin");
@@ -884,7 +907,7 @@ async function openMessage(id){
     if (atts.length){
       const box = document.createElement("div");
       box.className = "atts";
-      const base = "/api/attachment/" + encodeURIComponent(state.address) + "/" + encodeURIComponent(id) + "/";
+      const base = "/api/attachment/" + encodeURIComponent(targetAddress) + "/" + encodeURIComponent(id) + "/";
       box.innerHTML = atts.map((a) => {
         const url = base + encodeURIComponent(a.id);
         const name = esc(a.filename || "lampiran");
@@ -900,7 +923,7 @@ async function openMessage(id){
         return '<a class="att-file" href="' + url + '" download title="Unduh ' + escAttr(a.filename || "") + '">' +
           name + ' <span class="ttl">' + size + '</span></a>';
       }).join("");
-      const bodyEl = col.querySelector(".read-body");
+      const bodyEl = q("readBody");
       if (bodyEl) col.insertBefore(box, bodyEl); else col.appendChild(box);
     }
 
@@ -909,7 +932,7 @@ async function openMessage(id){
     const showText = () => {
       const pre = document.createElement("pre");
       pre.textContent = m.text_body || "(isi kosong)";
-      const body = $("readBody"); body.innerHTML = ""; body.appendChild(pre);
+      const body = q("readBody"); if (body) { body.innerHTML = ""; body.appendChild(pre); }
     };
     const showHtml = () => {
       const f = document.createElement("iframe");
@@ -917,38 +940,233 @@ async function openMessage(id){
       f.setAttribute("referrerpolicy", "no-referrer");
       f.style.height = fitH + "px";
       f.srcdoc = prepareEmailHtml(m.html_body || "", allowImages);
-      const body = $("readBody"); body.innerHTML = ""; body.appendChild(f);
+      const body = q("readBody"); if (body) { body.innerHTML = ""; body.appendChild(f); }
     };
     if (hasHtml){
       showHtml();
-      $("rHtml").addEventListener("click", () => { showHtml(); pickTab("rHtml","rText"); });
-      $("rText").addEventListener("click", () => { showText(); pickTab("rText","rHtml"); });
-      if ($("rImgToggle")) {
-        $("rImgToggle").addEventListener("click", () => {
+      const setTab = (onRole, offRole) => {
+        if (q(onRole)) q(onRole).setAttribute("aria-selected", "true");
+        if (q(offRole)) q(offRole).setAttribute("aria-selected", "false");
+      };
+      q("rHtml").addEventListener("click", () => { showHtml(); setTab("rHtml", "rText"); });
+      q("rText").addEventListener("click", () => { showText(); setTab("rText", "rHtml"); });
+      if (q("rImgToggle")) {
+        q("rImgToggle").addEventListener("click", () => {
           allowImages = !allowImages;
-          $("rImgToggle").textContent = allowImages ? "Sembunyikan gambar" : "Tampilkan gambar";
+          q("rImgToggle").textContent = allowImages ? "Sembunyikan gambar" : "Tampilkan gambar";
           showHtml();
-          pickTab("rHtml", "rText");
+          setTab("rHtml", "rText");
         });
       }
-      if ($("rExpandToggle")) {
-        $("rExpandToggle").addEventListener("click", () => {
+      if (q("rExpandToggle")) {
+        q("rExpandToggle").addEventListener("click", () => {
           const exp = col.classList.toggle("expanded");
-          $("rExpandToggle").textContent = exp ? "Normal" : "Perbesar";
+          q("rExpandToggle").textContent = exp ? "Normal" : "Perbesar";
         });
       }
     } else showText();
 
-    $("delBtn").addEventListener("click", async () => {
-      await api("/api/message/" + encodeURIComponent(state.address) + "/" + encodeURIComponent(id), { method: "DELETE" });
+    q("delBtn").addEventListener("click", async () => {
+      await api("/api/message/" + encodeURIComponent(targetAddress) + "/" + encodeURIComponent(id), { method: "DELETE" });
       state.messages = state.messages.filter((x) => x.id !== id);
-      state.selected = null;
-      renderEmptyRead(); renderList(); renderTitle();
+      state.allMessages = state.allMessages.filter((x) => x.id !== id);
+      if (typeof opts.onDeleted === "function") opts.onDeleted();
       loadAddresses(); loadMatrix({ silent: true });
     });
   } catch (e){
     col.innerHTML = '<div class="read-empty">Pesan gagal dimuat: ' + esc(e.message) + "</div>";
   }
+}
+
+async function openMessage(id){
+  state.selected = id;
+  state.read.add(id); store.read = state.read;
+  renderList();
+  renderAllList();
+  await renderMessageIntoColumn($("readCol"), "listCol", state.address, id, {
+    showOpenInbox: false,
+    onDeleted: () => {
+      state.selected = null;
+      if (state.allSelected === id) { state.allSelected = null; state.allSelectedAddr = ""; renderAllEmptyRead(); }
+      renderEmptyRead(); renderList(); renderAllList(); renderTitle();
+    },
+  });
+}
+
+/* ---------- All Inbox (unified mix inbox across all user addresses) ---------- */
+async function loadAllInbox(opts = {}){
+  const silent = !!(opts && opts.silent);
+  try {
+    const j = await api("/api/my/messages?limit=300");
+    const next = j.messages || [];
+    if (!state.allSeen) { state.allSeen = new Set(); state.allSeenReady = false; }
+    const fresh = next.filter((m) => !state.allSeen.has(m.id));
+    state.allSeen = new Set(next.map((m) => m.id));
+    const hadInitial = state.allSeenReady;
+    state.allSeenReady = true;
+    if (hadInitial && fresh.length && state.view === "all") {
+      nsPlay();
+      fireDesktopNotify(fresh[0]);
+      if (nsPrefs().autoOtp) {
+        const autoCode = extractOtp(fresh[0].subject, fresh[0].snippet || "", "");
+        if (autoCode && navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(autoCode).then(() => {
+            toast("OTP otomatis disalin: " + autoCode);
+          }).catch(() => {});
+        }
+      }
+    }
+    state.allMessages = next;
+    renderAllAddrFilter();
+    renderAllList();
+    if (state.view === "all") {
+      renderTitle();
+      renderAllEmptyRead();
+    }
+  } catch (e) {
+    if (!silent) toast("Gagal memuat All Inbox: " + e.message, true);
+  }
+}
+
+function renderAllAddrFilter(){
+  const sel = $("allAddrFilter");
+  const chip = $("allInboxCountChip");
+  const addrs = state.addressList || [];
+  if (chip) chip.textContent = addrs.length + " alamat aktif";
+  if (!sel) return;
+  const counts = new Map();
+  for (const m of state.allMessages || []) {
+    const a = (m.inbox || "").toLowerCase();
+    counts.set(a, (counts.get(a) || 0) + 1);
+  }
+  const allKnown = new Map();
+  for (const a of addrs) allKnown.set(a.address.toLowerCase(), a.note || "");
+  for (const m of state.allMessages || []) {
+    const a = (m.inbox || "").toLowerCase();
+    if (a && !allKnown.has(a)) allKnown.set(a, m.inbox_note || "");
+  }
+  const prev = state.allAddrFilter || "";
+  const optsHtml = ['<option value="">Semua alamat terdaftar (' + (state.allMessages || []).length + ')</option>']
+    .concat([...allKnown.entries()].sort((a, b) => (counts.get(b[0]) || 0) - (counts.get(a[0]) || 0)).map(([addr, note]) => {
+      const cnt = counts.get(addr) || 0;
+      const lbl = addr + (note ? " · " + note : "") + " (" + cnt + ")";
+      return `<option value="${escAttr(addr)}">${esc(lbl)}</option>`;
+    }));
+  sel.innerHTML = optsHtml.join("");
+  if (prev && allKnown.has(prev)) sel.value = prev;
+  else { sel.value = ""; state.allAddrFilter = ""; }
+}
+
+function visibleAllMessages(){
+  let rows = state.allMessages || [];
+  if (state.allAddrFilter) {
+    rows = rows.filter((m) => (m.inbox || "").toLowerCase() === state.allAddrFilter);
+  }
+  if (state.allFilter === "unread") {
+    rows = rows.filter((m) => !state.read.has(m.id));
+  }
+  const q = (state.allQuery || "").trim().toLowerCase();
+  if (q) {
+    rows = rows.filter((m) =>
+      (m.from_addr || "").toLowerCase().includes(q) ||
+      (m.from_name || "").toLowerCase().includes(q) ||
+      (m.subject || "").toLowerCase().includes(q) ||
+      (m.inbox || "").toLowerCase().includes(q) ||
+      (m.inbox_note || "").toLowerCase().includes(q));
+  }
+  return rows;
+}
+
+function renderAllList(){
+  const all = state.allMessages || [];
+  if ($("navAllCount")) $("navAllCount").textContent = String(all.length);
+  const list = $("allMsgList");
+  if (!list) return;
+  const rows = visibleAllMessages();
+  if ($("allListCount")) $("allListCount").textContent = rows.length + " pesan";
+  const unread = all.filter((m) => !state.read.has(m.id)).length;
+  if ($("allTabUnread")) $("allTabUnread").textContent = unread ? "Belum dibaca " + unread : "Belum dibaca";
+  if ($("allMarkAllReadBtn")) $("allMarkAllReadBtn").hidden = unread === 0;
+
+  if (!rows.length){
+    list.innerHTML = '<li><div class="empty-box" style="margin:12px 0">' +
+      (all.length ? "Tidak ada pesan yang cocok dengan filter." : "Belum ada email masuk di alamat mana pun.") +
+      "</div></li>";
+    return;
+  }
+  list.innerHTML = rows.map((m) => {
+    const isUnread = !state.read.has(m.id);
+    const who = m.from_name || m.from_addr || "Pengirim tidak dikenal";
+    const otp = extractOtp(m.subject, m.snippet || "", "");
+    const otpBadge = otp
+      ? `<span class="otp-chip" role="button" tabindex="0" data-copy-otp="${escAttr(otp)}" title="Klik untuk salin kode OTP ${escAttr(otp)}">OTP ${esc(otp)}</span>`
+      : "";
+    const noteChip = m.inbox_note ? `<span class="all-note-chip">${esc(m.inbox_note)}</span>` : "";
+    return `<li>
+      <button class="msg-row${isUnread ? " unread" : ""}" data-all-id="${escAttr(m.id)}" data-all-addr="${escAttr(m.inbox)}" aria-selected="${state.allSelected === m.id}">
+        <span class="from-line">
+          ${isUnread ? '<span class="unread-dot" aria-hidden="true"></span>' : ""}
+          <span class="who">${esc(who)}</span>
+        </span>
+        <span class="when">${fmtTime(m.received_at)}</span>
+        <span class="all-to-line">
+          <span class="all-to-chip" title="Masuk ke ${escAttr(m.inbox)}">ke: ${esc(m.inbox)}</span>
+          ${noteChip}
+        </span>
+        <span class="subj">${esc(m.subject || "(tanpa subjek)")}${otpBadge}</span>
+      </button></li>`;
+  }).join("");
+
+  list.querySelectorAll("[data-copy-otp]").forEach((chip) => {
+    chip.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      const code = chip.dataset.copyOtp;
+      try {
+        await navigator.clipboard.writeText(code);
+        toast("Kode OTP disalin: " + code);
+      } catch {
+        toast("Kode OTP: " + code);
+      }
+    });
+  });
+  list.querySelectorAll("[data-all-id]").forEach((b) =>
+    b.addEventListener("click", () => openAllMessage(b.dataset.allAddr, b.dataset.allId)));
+}
+
+async function openAllMessage(address, id){
+  state.allSelected = id;
+  state.allSelectedAddr = address;
+  state.read.add(id); store.read = state.read;
+  renderAllList();
+  renderList();
+  await renderMessageIntoColumn($("allReadCol"), "allListCol", address, id, {
+    showOpenInbox: true,
+    onDeleted: () => {
+      state.allSelected = null;
+      state.allSelectedAddr = "";
+      if (state.selected === id) { state.selected = null; renderEmptyRead(); }
+      renderAllEmptyRead(); renderAllList(); renderList(); renderTitle();
+    },
+  });
+}
+
+function renderAllEmptyRead(){
+  if (state.allSelected) return;
+  const col = $("allReadCol");
+  if (!col) return;
+  const total = (state.allMessages || []).length;
+  const unread = (state.allMessages || []).filter((m) => !state.read.has(m.id)).length;
+  col.innerHTML = `
+    <div class="read-empty">
+      <h2>Belum ada pesan dibuka</h2>
+      <p>Semua email yang masuk ke seluruh alamat terdaftar Anda berkumpul di sini secara real-time.</p>
+      <dl class="kv">
+        <dt>alamat aktif</dt><dd>${(state.addressList || []).length}</dd>
+        <dt>total pesan</dt><dd>${total}</dd>
+        <dt>belum dibaca</dt><dd>${unread}</dd>
+      </dl>
+    </div>`;
 }
 function pickTab(on, off){
   $(on).setAttribute("aria-selected","true");
@@ -1176,6 +1394,15 @@ async function userAction(id, act){
 /* ---------- title / render ---------- */
 function renderTitle(){
   const v = state.view;
+  if (v === "all"){
+    $("pageTitle").textContent = "All Inbox";
+    const total = (state.allMessages || []).length;
+    const unread = (state.allMessages || []).filter((m) => !state.read.has(m.id)).length;
+    const parts = [total + " pesan dari " + (state.addressList || []).length + " alamat aktif"];
+    if (unread) parts.push(unread + " belum dibaca");
+    $("pageSub").textContent = parts.join(" · ");
+    return;
+  }
   if (v === "addresses"){ $("pageTitle").textContent = "Alamat"; $("pageSub").textContent = (state.addressList || []).length + " alamat aktif"; return; }
   if (v === "matrix"){ $("pageTitle").textContent = "Account Matrix"; $("pageSub").textContent = (state.matrixList || []).length + " akun terdaftar · Identity, Live 2FA TOTP & Email OTP"; return; }
   if (v === "account"){ $("pageTitle").textContent = "Pengaturan akun"; $("pageSub").innerHTML = esc(state.me ? state.me.email : "") + ' ' + (state.me ? roleBadge(state.me.role) : ""); return; }
@@ -1267,7 +1494,7 @@ function toast(msg, bad){
   toastTimer = setTimeout(() => { el.style.display = "none"; }, 3200);
 }
 
-const VIEWS = ["inbox", "addresses", "matrix", "domains", "account", "users", "audit", "dashboard"];
+const VIEWS = ["inbox", "all", "addresses", "matrix", "domains", "account", "users", "audit", "dashboard"];
 
 function route(){
   const h = location.hash.replace(/^#\/?/, "") || "inbox";
@@ -1275,6 +1502,7 @@ function route(){
   if ((state.view === "users" || state.view === "audit" || state.view === "dashboard") && !isStaff()) state.view = "inbox";
 
   $("inboxView").hidden = state.view !== "inbox";
+  if ($("allInboxView")) $("allInboxView").hidden = state.view !== "all";
   $("addressesView").hidden = state.view !== "addresses";
   if ($("matrixView")) $("matrixView").hidden = state.view !== "matrix";
   $("domainsView").hidden = state.view !== "domains";
@@ -1289,6 +1517,12 @@ function route(){
   const ta = document.querySelector(".title-actions");
   if (ta) ta.hidden = state.view !== "inbox";
 
+  if (state.view === "all") {
+    loadAllInbox();
+    connectAllSSE();
+  } else {
+    disconnectAllSSE();
+  }
   if (state.view === "addresses") loadAddresses();
   if (state.view === "matrix") loadMatrix();
   if (state.view === "domains") { loadDomains(); loadAdminDomains(); }
@@ -1297,6 +1531,11 @@ function route(){
   if (state.view === "audit") loadAudit();
   if (state.view === "dashboard") loadDashboard();
   if (state.view !== "addresses") { if ($("bulkBar")) $("bulkBar").hidden = true; if (state.sel) state.sel.clear(); }
+
+  if ($("searchInput")) {
+    $("searchInput").value = state.view === "all" ? (state.allQuery || "") : (state.query || "");
+    $("searchInput").placeholder = state.view === "all" ? "Cari pengirim, subjek, atau alamat tujuan" : "Cari pengirim atau subjek";
+  }
 
   renderTitle();
   closeNav();
@@ -1309,6 +1548,8 @@ async function loadAddresses(){
   $("navAddr").textContent = String(state.addressList.length);
   renderAddresses();
   renderAddrSwitcher();
+  renderAllAddrFilter();
+  if (state.view === "all") renderTitle();
 }
 
 function renderAddrSwitcher(){
@@ -2790,12 +3031,66 @@ function renderAudit(){
 /* ---------- realtime ---------- */
 let evtSource = null;
 let sseReconnectTimer = null;
+let allEvtSource = null;
+let allSseReconnectTimer = null;
 
 function setSseLive(isLive){
   const badge = $("sseLiveBadge"), txt = $("sseLiveText");
   if (!badge) return;
   badge.dataset.live = isLive ? "true" : "false";
   if (txt) txt.textContent = isLive ? "Live" : "Idle";
+}
+
+function setAllSseLive(isLive){
+  const badge = $("allSseLiveBadge"), txt = $("allSseLiveText");
+  if (!badge) return;
+  badge.dataset.live = isLive ? "true" : "false";
+  if (txt) txt.textContent = isLive ? "Live" : "Idle";
+}
+
+function disconnectAllSSE(){
+  clearTimeout(allSseReconnectTimer);
+  if (allEvtSource) { try { allEvtSource.close(); } catch {} allEvtSource = null; }
+  setAllSseLive(false);
+}
+
+function connectAllSSE(){
+  disconnectAllSSE();
+  if (!state.me || state.view !== "all") return;
+  if (!("EventSource" in window)) return;
+  try {
+    const es = new EventSource("/api/events?address=__all__");
+    allEvtSource = es;
+    es.onopen = () => setAllSseLive(true);
+    es.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        if (d.type === "open" || d.type === "ping") setAllSseLive(true);
+        if (d.type === "state") {
+          setAllSseLive(true);
+          const curLatestId = state.allMessages[0] ? state.allMessages[0].id : null;
+          const nextLatestId = d.latest ? d.latest.id : null;
+          if (d.count !== state.allMessages.length || nextLatestId !== curLatestId) {
+            loadAllInbox({ silent: true });
+            loadAddresses();
+            loadMatrix({ silent: true });
+            if (state.address && d.latest && d.latest.inbox === state.address) loadInbox();
+          }
+        }
+      } catch {}
+    };
+    es.onerror = () => {
+      try { es.close(); } catch {}
+      if (allEvtSource === es) allEvtSource = null;
+      if (state.me && state.view === "all" && !document.hidden) {
+        allSseReconnectTimer = setTimeout(connectAllSSE, 1500);
+      } else {
+        setAllSseLive(false);
+      }
+    };
+  } catch {
+    setAllSseLive(false);
+  }
 }
 
 function connectSSE(){
@@ -2817,6 +3112,7 @@ function connectSSE(){
           const nextLatestId = d.latest ? d.latest.id : null;
           if (d.count !== state.messages.length || nextLatestId !== curLatestId) {
             loadInbox();
+            loadAllInbox({ silent: true });
             loadAddresses();
             loadMatrix({ silent: true });
           }
@@ -2843,6 +3139,10 @@ document.addEventListener("visibilitychange", () => {
     if (state.address) {
       loadInbox();
       if (!evtSource) connectSSE();
+    }
+    if (state.view === "all") {
+      loadAllInbox({ silent: true });
+      if (!allEvtSource) connectAllSSE();
     }
     if (state.view === "matrix") {
       loadMatrix({ silent: true });
@@ -2876,11 +3176,14 @@ function bindAppShellEvents(){
   on("acctLogout", "click", async () => {
     try { await api("/api/auth/logout", { method: "POST" }); } catch {}
     state.me = null; state.address = ""; state.pinned = false; state.messages = []; state.selected = null;
+    state.allMessages = []; state.allSelected = null; state.allSelectedAddr = ""; state.allSeen = null; state.allSeenReady = false;
     state.matrixList = []; state.addressList = []; state.mxSeenOtps = null; state.mxSeenReady = false;
     if ($("navMatrix")) $("navMatrix").textContent = "0";
+    if ($("navAllCount")) $("navAllCount").textContent = "0";
     if ($("navAddr")) $("navAddr").textContent = "0";
     store.address = ""; store.expires = 0; store.pinned = false;
     if (evtSource) { try { evtSource.close(); } catch {} evtSource = null; }
+    disconnectAllSSE();
     if ($("appShell")) $("appShell").hidden = true;
     $("authScreen").hidden = false;
     authTab("login");
@@ -2998,14 +3301,22 @@ function bindAppShellEvents(){
   on("copyBtn", "click", copyAddress);
   on("copyTop", "click", copyAddress);
   on("refreshBtn", "click", () => {
+    if (state.view === "all") { loadAllInbox(); loadAddresses(); return; }
     if (state.view === "matrix") { loadMatrix(); return; }
     if (state.view === "addresses") { loadAddresses(); return; }
     loadInbox();
+    loadAllInbox({ silent: true });
     if (isStaff()) loadUsers();
   });
   on("menuBtn", "click", openNav);
   on("navClose", "click", closeNav);
   on("searchInput", "input", (e) => {
+    if (state.view === "all") {
+      state.allQuery = e.target.value;
+      if ($("allMobileSearchInput") && $("allMobileSearchInput").value !== state.allQuery) $("allMobileSearchInput").value = state.allQuery;
+      renderAllList();
+      return;
+    }
     state.query = e.target.value;
     if ($("mobileSearchInput") && $("mobileSearchInput").value !== state.query) $("mobileSearchInput").value = state.query;
     renderList();
@@ -3014,6 +3325,34 @@ function bindAppShellEvents(){
     state.query = e.target.value;
     if ($("searchInput") && $("searchInput").value !== state.query) $("searchInput").value = state.query;
     renderList();
+  });
+  on("allMobileSearchInput", "input", (e) => {
+    state.allQuery = e.target.value;
+    if ($("searchInput") && state.view === "all" && $("searchInput").value !== state.allQuery) $("searchInput").value = state.allQuery;
+    renderAllList();
+  });
+  on("allAddrFilter", "change", (e) => {
+    state.allAddrFilter = e.target.value || "";
+    renderAllList();
+  });
+  on("allTabAll", "click", () => {
+    state.allFilter = "all";
+    if ($("allTabAll")) $("allTabAll").setAttribute("aria-selected", "true");
+    if ($("allTabUnread")) $("allTabUnread").setAttribute("aria-selected", "false");
+    renderAllList();
+  });
+  on("allTabUnread", "click", () => {
+    state.allFilter = "unread";
+    if ($("allTabUnread")) $("allTabUnread").setAttribute("aria-selected", "true");
+    if ($("allTabAll")) $("allTabAll").setAttribute("aria-selected", "false");
+    renderAllList();
+  });
+  on("allMarkAllReadBtn", "click", () => {
+    if (!state.allMessages.length) return;
+    for (const m of state.allMessages) state.read.add(m.id);
+    store.read = state.read;
+    renderAllList(); renderList(); renderTitle();
+    toast("Semua pesan di All Inbox ditandai sudah dibaca");
   });
   on("tabAll", "click", () => { state.filter = "all"; $("tabAll").setAttribute("aria-selected","true"); $("tabUnread").setAttribute("aria-selected","false"); renderList(); });
   on("tabUnread", "click", () => { state.filter = "unread"; $("tabUnread").setAttribute("aria-selected","true"); $("tabAll").setAttribute("aria-selected","false"); renderList(); });
@@ -3359,6 +3698,7 @@ function bulkExport(){
     authTab("login");
   }
   setInterval(() => { if (state.me && state.address && !evtSource) loadInbox(); }, 15000);
+  setInterval(() => { if (state.me && state.view === "all" && !allEvtSource && !document.hidden) loadAllInbox({ silent: true }); }, 10000);
   setInterval(() => { if (state.me && state.view === "matrix" && !document.hidden) loadMatrix({ silent: true }); }, 8000);
   setInterval(() => { if (state.me && isStaff() && state.view === "users") loadUsers(); }, 20000);
 })();

@@ -15,6 +15,7 @@ export const APP_SHELL_HTML = `
 
     <nav aria-label="Navigasi utama">
       <a class="nav-item" href="#/inbox" data-nav="inbox">Inbox <span class="n" id="navCount">0</span></a>
+      <a class="nav-item" href="#/all" data-nav="all">All Inbox <span class="n" id="navAllCount">0</span></a>
       <a class="nav-item" href="#/addresses" data-nav="addresses">Alamat <span class="n" id="navAddr">0</span></a>
       <a class="nav-item" href="#/matrix" data-nav="matrix">Matrix <span class="n" id="navMatrix">0</span></a>
       <a class="nav-item" href="#/domains" data-nav="domains">Domain <span class="n" id="navDomains">0</span></a>
@@ -193,6 +194,41 @@ export const APP_SHELL_HTML = `
           <div class="read-empty" id="readEmpty">
             <h2>Belum ada pesan dibuka</h2>
             <p>Pilih satu pesan di kolom kiri. Email yang masuk ke alamat aktif muncul di daftar itu dalam beberapa detik.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="allInboxView" hidden>
+      <div class="all-bar">
+        <div class="all-bar-left">
+          <span class="live-pill" id="allSseLiveBadge" data-live="false" title="Status pantauan semua email masuk realtime"><span class="live-dot"></span><span id="allSseLiveText">Live</span></span>
+          <span class="chip" id="allInboxCountChip">0 alamat</span>
+        </div>
+        <div class="all-bar-right">
+          <select id="allAddrFilter" aria-label="Filter menurut alamat tujuan">
+            <option value="">Semua alamat terdaftar</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="inbox" id="allInboxBody">
+        <div class="list-col" id="allListCol">
+          <div class="mobile-search">
+            <input id="allMobileSearchInput" type="search" placeholder="Cari pengirim, subjek, atau alamat…" aria-label="Cari di All Inbox">
+          </div>
+          <div class="list-toolbar" role="tablist" aria-label="Filter pesan All Inbox">
+            <button class="tab" role="tab" id="allTabAll" aria-selected="true">Semua</button>
+            <button class="tab" role="tab" id="allTabUnread" aria-selected="false">Belum dibaca</button>
+            <span class="list-count" id="allListCount">0 pesan</span>
+            <button class="btn btn-sm" id="allMarkAllReadBtn" type="button" title="Tandai semua pesan sudah dibaca" hidden>Baca semua</button>
+          </div>
+          <ul class="msg-list" id="allMsgList"></ul>
+        </div>
+        <div class="read-col" id="allReadCol">
+          <div class="read-empty" id="allReadEmpty">
+            <h2>Belum ada pesan dibuka</h2>
+            <p>Semua email dari seluruh alamat aktif Anda tampil di kolom kiri secara real-time.</p>
           </div>
         </div>
       </div>

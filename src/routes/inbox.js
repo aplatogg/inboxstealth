@@ -17,9 +17,13 @@ export async function handleEvents(request, env, url, user) {
   const rl = await hitRate(env, "sse|" + ipOf(request), 60, 5 * 60_000);
   if (!rl.ok) return json({ error: "too_many_requests", retry_after: rl.retry }, 429);
   const address = (url.searchParams.get("address") || "").toLowerCase();
-  const box = await inboxRowOrRestoreFromMatrix(env, address);
-  if (!box) return json({ error: "inbox_not_found" }, 404);
-  if (!(await canSee(env, user, box))) return json({ error: "not_found" }, 404);
+  const isAll = address === "__all__";
+  let box = null;
+  if (!isAll) {
+    box = await inboxRowOrRestoreFromMatrix(env, address);
+    if (!box) return json({ error: "inbox_not_found" }, 404);
+    if (!(await canSee(env, user, box))) return json({ error: "not_found" }, 404);
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -38,14 +42,28 @@ export async function handleEvents(request, env, url, user) {
       };
       send({ type: "open", address });
 
-      const isPinned = box.pinned === 1;
+      const isPinned = box && box.pinned === 1;
       let prevSig = "";
       const timer = setInterval(async () => {
         ticks++;
         try {
-          const stmt = isPinned
-            ? env.DB.prepare(`SELECT id, received_at FROM messages WHERE inbox = ?1 ORDER BY received_at DESC LIMIT 200`).bind(address)
-            : env.DB.prepare(`SELECT id, received_at FROM messages WHERE inbox = ?1 AND expires_at > ?2 ORDER BY received_at DESC LIMIT 200`).bind(address, Date.now());
+          let stmt;
+          if (isAll) {
+            const t = Date.now();
+            stmt = env.DB.prepare(
+              `SELECT m.id, m.inbox, m.received_at
+                 FROM messages m
+                 JOIN inboxes i ON i.address = m.inbox
+                WHERE i.user_id = ?1
+                  AND (i.expires_at > ?2 OR i.pinned = 1)
+                  AND (m.expires_at > ?2 OR i.pinned = 1)
+                ORDER BY m.received_at DESC LIMIT 300`
+            ).bind(user.id, t);
+          } else {
+            stmt = isPinned
+              ? env.DB.prepare(`SELECT id, received_at FROM messages WHERE inbox = ?1 ORDER BY received_at DESC LIMIT 200`).bind(address)
+              : env.DB.prepare(`SELECT id, received_at FROM messages WHERE inbox = ?1 AND expires_at > ?2 ORDER BY received_at DESC LIMIT 200`).bind(address, Date.now());
+          }
           const { results } = await stmt.all();
           const rows = results || [];
           const latest = rows[0] || null;
@@ -1085,6 +1103,47 @@ export async function handleInboxRoutes(request, env, url, user) {
         ORDER BY i.pinned DESC, i.last_seen DESC LIMIT 100`
     ).bind(user.id, now()).all();
     return json({ inboxes: results || [] });
+  }
+
+  if (p === "/api/my/messages" && method === "GET") {
+    const t = now();
+    const rawLimit = Number(url.searchParams.get("limit") || 300);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(1, Math.floor(rawLimit)), 400) : 300;
+    const filterAddr = (url.searchParams.get("address") || "").trim().toLowerCase();
+    let stmt;
+    if (filterAddr) {
+      stmt = env.DB.prepare(
+        `SELECT m.id, m.inbox, m.from_addr, m.from_name, m.to_addr, m.subject,
+                m.received_at, m.raw_size, m.attach_count,
+                SUBSTR(COALESCE(m.text_body, m.html_body, ''), 1, 1200) AS snippet,
+                i.note AS inbox_note
+           FROM messages m
+           JOIN inboxes i ON i.address = m.inbox
+          WHERE i.user_id = ?1
+            AND m.inbox = ?2
+            AND (i.expires_at > ?3 OR i.pinned = 1)
+            AND (m.expires_at > ?3 OR i.pinned = 1)
+          ORDER BY m.received_at DESC
+          LIMIT ?4`
+      ).bind(user.id, filterAddr, t, limit);
+    } else {
+      stmt = env.DB.prepare(
+        `SELECT m.id, m.inbox, m.from_addr, m.from_name, m.to_addr, m.subject,
+                m.received_at, m.raw_size, m.attach_count,
+                SUBSTR(COALESCE(m.text_body, m.html_body, ''), 1, 1200) AS snippet,
+                i.note AS inbox_note
+           FROM messages m
+           JOIN inboxes i ON i.address = m.inbox
+          WHERE i.user_id = ?1
+            AND (i.expires_at > ?2 OR i.pinned = 1)
+            AND (m.expires_at > ?2 OR i.pinned = 1)
+          ORDER BY m.received_at DESC
+          LIMIT ?3`
+      ).bind(user.id, t, limit);
+    }
+    const { results } = await stmt.all();
+    const rows = results || [];
+    return json({ total: rows.length, messages: rows });
   }
 
   const mClearMsgs = p.match(/^\/api\/inbox\/([^/]+)\/messages$/);
